@@ -1,4 +1,4 @@
-# scrolly
+# Mosign
 
 A Python program that uses your webcam to control a web browser with hand gestures. You can scroll up and down, stop scrolling, and switch tabs without touching the keyboard or mouse.
 
