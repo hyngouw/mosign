@@ -16,6 +16,7 @@ from mosign.ui import HEIGHT, UI, WIDTH, WINDOW_TITLE, View, render_message
 KEY_COMMANDS = {
     ord("c"): "swap_camera",
     ord("s"): "toggle_tracking",
+    ord("m"): "toggle_menu",
     ord("q"): "quit",
 }
 
@@ -86,6 +87,7 @@ def main(argv=None):
         stable_frames=cfg.stable_frames,
         tab_cooldown=cfg.tab_cooldown,
         hold_seconds=cfg.hold_seconds,
+        menu_visible=cfg.menu_visible,
     )
     ui = UI()
     fps = FpsCounter()
@@ -116,6 +118,7 @@ def main(argv=None):
                 events=list(controller.events),
                 camera_label=camera.label,
                 fps=fps.tick(now),
+                menu_visible=controller.menu_visible,
             )
             cv2.imshow(WINDOW_TITLE, ui.render(view, now))
 
@@ -137,6 +140,12 @@ def main(argv=None):
                         ui.toast("No other camera found", now)
                 elif cmd == "toggle_tracking":
                     controller.toggle_awake()
+                elif cmd == "toggle_menu":
+                    controller.toggle_menu()
+
+            if controller.menu_visible != cfg.menu_visible:
+                cfg.menu_visible = controller.menu_visible
+                cfg.save()
 
             frames += 1
             if args.max_frames and frames >= args.max_frames:

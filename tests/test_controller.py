@@ -118,3 +118,27 @@ def test_holding_reports_progress():
     assert label == "toggle_tracking" and progress == pytest.approx(0.25)
     c.update(None, 0.3)
     assert c.holding is None
+
+
+def test_pinky_hold_toggles_menu_even_while_asleep():
+    acts = RecordingActions()
+    c = Controller(acts, stable_frames=2, hold_seconds=1.0, menu_visible=True)
+    events = []
+    t = 0.0
+    for _ in range(50):
+        c.update("toggle_menu", t)
+        events += c.events
+        t += 0.033
+    assert not c.menu_visible and events == ["menu_off"]
+    c.set_awake(False)
+    t = feed(c, None, 3, t)
+    t = hold(c, "toggle_menu", 1.2, t)
+    assert c.menu_visible
+    assert acts.calls == []
+
+
+def test_holding_reports_menu_progress():
+    c = Controller(RecordingActions(), stable_frames=1, hold_seconds=1.0)
+    c.update("toggle_menu", 0.0)
+    c.update("toggle_menu", 0.5)
+    assert c.holding == ("toggle_menu", pytest.approx(0.5))

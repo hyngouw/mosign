@@ -80,3 +80,11 @@ def test_config_survives_bad_files(isolated_home):
     assert cfg.camera_index == 0 and cfg.scroll_amount == 4
     config_path().write_text("[1, 2]")
     assert Config.load() == Config()
+
+
+def test_bool_setting_ignores_string_junk(isolated_home):
+    isolated_home.mkdir(parents=True, exist_ok=True)
+    config_path().write_text('{"menu_visible": "false"}')
+    assert Config.load().menu_visible is True
+    config_path().write_text('{"menu_visible": false}')
+    assert Config.load().menu_visible is False

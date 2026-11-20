@@ -49,7 +49,7 @@ def test_finger_aimed_at_camera_is_ignored():
 
 
 @pytest.mark.parametrize("fingers", [
-    set(), ALL, {"index", "middle"}, {"index", "middle", "ring"}, {"thumb", "pinky"},
+    set(), ALL, {"index", "middle"}, {"index", "middle", "ring"}, {"middle"},
 ])
 def test_other_poses_do_nothing(fingers):
     assert classify_landmarks(make_hand(fingers)) is None
@@ -90,3 +90,8 @@ def test_hold_trigger_fires_once_per_hold():
     assert h.progress == 0
     assert not h.update(True, 4.0)
     assert h.update(True, 5.0)
+
+
+@pytest.mark.parametrize("fingers", [{"pinky"}, {"pinky", "thumb"}])
+def test_pinky_is_the_menu_gesture(fingers):
+    assert classify_landmarks(make_hand(fingers)) == "toggle_menu"

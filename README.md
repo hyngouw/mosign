@@ -22,6 +22,7 @@ Point your index finger the way you want to go (other fingers curled, thumb eith
 | Point left | Previous tab (Ctrl+Shift+Tab) |
 | Point right | Next tab (Ctrl+Tab) |
 | Rock horns (index + pinky), hold 1 second | Turn tracking off / back on |
+| Pinky up (only the pinky), hold 1 second | Hide / show the gesture menu |
 | Anything else / lower your hand | Stop / no action |
 
 The camera view is mirrored, so "left" means your left.
@@ -30,12 +31,13 @@ While tracking is off, only the rock-horns gesture is watched for, so you can re
 
 ## The app window
 
-Mosign opens a light-green window that shows your camera with your hand's skeleton drawn on top, plus a "Right now" card that says which gesture it sees and what it's doing.
+Mosign opens a light-green window that shows your camera with your hand's skeleton drawn on top, plus a "Right now" card that says which gesture it sees and what it's doing. The **Gestures** menu in the top right shows every gesture with a small animated hand, and lights up the one you're doing.
 
 | Key / button | Action |
 |---|---|
 | `C` / **Swap camera** | Switch to the next working camera (remembered next time) |
 | `S` / **Pause tracking** | Pause or resume tracking |
+| `M` / **Hide menu** | Hide or show the gesture menu |
 | `Q` / **Quit** | Quit |
 
 Settings are saved in `~/.mosign/config.json` (camera, scroll speed, hold time, etc.).

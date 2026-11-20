@@ -48,6 +48,7 @@ SCROLL_DOWN = "scroll_down"
 PREV_TAB = "prev_tab"
 NEXT_TAB = "next_tab"
 TOGGLE_TRACKING = "toggle_tracking"   # the wake / sleep gesture
+TOGGLE_MENU = "toggle_menu"           # show / hide the reference menu
 
 # Hold a special gesture this long before it counts.
 HOLD_SECONDS = 1.0
@@ -102,18 +103,26 @@ def is_horns_pose(up):
     return up - {"thumb"} == {"index", "pinky"}
 
 
+def is_pinky_pose(up):
+    """Only the pinky out (thumb either way). Shows / hides the gesture menu."""
+    return up - {"thumb"} == {"pinky"}
+
+
 def classify_landmarks(lm):
     """Landmarks -> gesture label (or None).
 
     Point your index finger the way you want to go:
     up = scroll up, down = scroll down, left = previous tab, right = next tab.
     Hold "rock horns" to turn tracking on or off.
+    Hold up just your pinky to show or hide the gesture menu.
     """
     if lm is None:
         return None
     up = fingers_extended(lm)
     if is_horns_pose(up):
         return TOGGLE_TRACKING
+    if is_pinky_pose(up):
+        return TOGGLE_MENU
     if is_pointing_pose(up):
         return _DIRECTION_TO_LABEL.get(pointing_direction(lm))
     return None

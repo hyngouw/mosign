@@ -72,3 +72,40 @@ def test_hand_drawn_in_yellow():
 def test_message_screen_wraps_long_text():
     img = render_message("Oops", "word " * 200)
     assert img.shape == (HEIGHT, WIDTH, 3)
+
+
+def test_menu_panel_shows_and_hides():
+    from mosign.ui import RIGHT
+    ui = UI()
+    shown = ui.render(View(menu_visible=True), now=0)
+    hidden = ui.render(View(menu_visible=False), now=0)
+    region = (slice(RIGHT.y + 80, RIGHT.bottom), slice(RIGHT.x, RIGHT.right))
+    assert np.any(shown[region] != hidden[region], axis=2).mean() > 0.3
+    # hidden: the lower part of the panel area is plain background
+    assert np.all(hidden[RIGHT.bottom - 20, RIGHT.x + 20] == theme.BG)
+
+
+def test_menu_highlights_current_gesture():
+    from mosign.ui import RIGHT
+    ui = UI()
+    plain = ui.render(View(), now=0)
+    lit = ui.render(View(confirmed="next_tab"), now=0)
+    region = (slice(RIGHT.y, RIGHT.bottom), slice(RIGHT.x, RIGHT.right))
+    yellow = np.all(np.abs(lit[region].astype(int) - theme.YELLOW_SOFT) < 6, axis=2)
+    assert yellow.sum() > 2000
+    assert not np.array_equal(plain[region], lit[region])
+
+
+def test_menu_button_present():
+    ui = UI()
+    ui.render(View(menu_visible=False), now=0)
+    assert any(b.command == "toggle_menu" and b.label == "Show menu" for b in ui.buttons)
+
+
+def test_all_gesture_icons_draw():
+    from mosign.icons import POSES, draw_gesture_icon
+    for label in POSES:
+        for t in (0.0, 0.4, 1.3):
+            img = np.full((80, 80, 3), 250, np.uint8)
+            draw_gesture_icon(img, (40, 40), 66, label, t)
+            assert (img != 250).any(axis=2).sum() > 300

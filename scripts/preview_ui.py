@@ -47,6 +47,8 @@ def scenes():
                                    holding=("toggle_tracking", 0.6), fps=30)
     yield "05_paused", View(frame=frame, hand=norm_hand(set()), awake=False, fps=30)
     yield "06_no_camera", View(frame=None, camera_label="No camera")
+    yield "07_menu_hidden", View(frame=frame, hand=norm_hand({"pinky"}), confirmed="toggle_menu",
+                                 holding=("toggle_menu", 0.3), menu_visible=False, fps=30)
 
 
 def main(out=None):

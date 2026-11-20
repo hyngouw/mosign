@@ -23,7 +23,15 @@ from mosign.draw import (
     rounded_rect,
     soft_shadow,
 )
-from mosign.gestures import NEXT_TAB, PREV_TAB, SCROLL_DOWN, SCROLL_UP, TOGGLE_TRACKING
+from mosign.gestures import (
+    NEXT_TAB,
+    PREV_TAB,
+    SCROLL_DOWN,
+    SCROLL_UP,
+    TOGGLE_MENU,
+    TOGGLE_TRACKING,
+)
+from mosign.icons import draw_gesture_icon
 from mosign.tracker import HAND_CONNECTIONS
 
 WIDTH, HEIGHT = 1280, 760
@@ -44,7 +52,18 @@ GESTURE_NAMES = {
     PREV_TAB: "Pointing left",
     NEXT_TAB: "Pointing right",
     TOGGLE_TRACKING: "Rock horns",
+    TOGGLE_MENU: "Pinky up",
 }
+
+# Reference menu rows: (gesture label, title, what it does)
+MENU_ROWS = [
+    (SCROLL_UP, "Point up", "Scroll up"),
+    (SCROLL_DOWN, "Point down", "Scroll down"),
+    (PREV_TAB, "Point left", "Previous tab"),
+    (NEXT_TAB, "Point right", "Next tab"),
+    (TOGGLE_TRACKING, "Hold rock horns", "Pause / resume tracking"),
+    (TOGGLE_MENU, "Hold pinky up", "Hide / show this menu"),
+]
 
 EVENT_TEXT = {
     "scroll_up": "Scrolling up",
@@ -53,6 +72,8 @@ EVENT_TEXT = {
     "next_tab": "Next tab",
     "sleep": "Tracking paused",
     "wake": "Tracking on",
+    "menu_on": "Menu shown",
+    "menu_off": "Menu hidden",
 }
 
 
@@ -69,6 +90,7 @@ class View:
     events: list = field(default_factory=list)
     camera_label: str = "Camera 0"
     fps: float = 0.0
+    menu_visible: bool = True
 
 
 @dataclass
@@ -87,7 +109,7 @@ class UI:
         self._flash = None   # (text, until)
         self.buttons = []
         self._camera_mask = rounded_mask(CAMERA.w, CAMERA.h, 18)
-        self._static = self._build_static()
+        self._statics = {}
 
     # ---------- input ----------
     def on_mouse(self, event, x, y, flags=0, param=None):
@@ -110,21 +132,33 @@ class UI:
         self._toast = (text, now + seconds)
 
     # ---------- drawing ----------
-    def _build_static(self):
-        img = np.full((HEIGHT, WIDTH, 3), theme.BG, np.uint8)
-        for rect in self._static_cards():
-            soft_shadow(img, rect)
-        for rect in self._static_cards():
-            card(img, rect)
-        return img
+    def _static(self, view):
+        """Background with card shadows. Built once per layout, then copied."""
+        key = self._static_key(view)
+        if key not in self._statics:
+            img = np.full((HEIGHT, WIDTH, 3), theme.BG, np.uint8)
+            cards = self._static_cards(view)
+            for rect in cards:
+                soft_shadow(img, rect)
+            for rect in cards:
+                card(img, rect)
+            self._statics[key] = img
+        return self._statics[key]
 
-    def _static_cards(self):
-        return [CAMERA, STATUS]
+    def _static_key(self, view):
+        return (view.menu_visible,)
+
+    def _static_cards(self, view):
+        cards = [CAMERA, STATUS]
+        if view.menu_visible:
+            cards.append(RIGHT)
+        return cards
 
     def _layout_buttons(self, view):
         buttons = [
             Button("swap_camera", "Swap camera", "C"),
             Button("toggle_tracking", "Pause tracking" if view.awake else "Resume tracking", "S"),
+            Button("toggle_menu", "Hide menu" if view.menu_visible else "Show menu", "M"),
             Button("quit", "Quit", "Q"),
         ]
         x = BAR.x
@@ -135,7 +169,7 @@ class UI:
         return buttons
 
     def render(self, view, now):
-        img = self._static.copy()
+        img = self._static(view).copy()
         text = TextLayer()
 
         for event in view.events:
@@ -149,6 +183,7 @@ class UI:
         self._draw_header(img, text, view)
         self._draw_camera(img, text, view)
         self._draw_status(img, text, view)
+        self._draw_menu(img, text, view, now)
         self.buttons = self._layout_buttons(view)
         self._draw_buttons(img, text)
         self._draw_extras(img, text, view, now)
@@ -275,7 +310,10 @@ class UI:
                        theme.GREEN_DARK, 16)
 
         if view.holding:
-            msg = "Keep holding to pause tracking" if view.awake else "Keep holding to wake up"
+            if view.holding[0] == TOGGLE_MENU:
+                msg = "Keep holding to " + ("hide" if view.menu_visible else "show") + " the menu"
+            else:
+                msg = "Keep holding to pause tracking" if view.awake else "Keep holding to wake up"
             text.add(msg, (x, y + 146), 15, theme.MUTED, False, "lm")
             progress_bar(img, Rect(x, y + 160, STATUS.w - 56, 10), view.holding[1])
         else:
@@ -285,6 +323,32 @@ class UI:
         if view.fps:
             text.add(f"{view.fps:.0f} fps", (STATUS.right - 24, y + 26), 13, theme.MUTED,
                      False, "rm")
+
+    def _draw_menu(self, img, text, view, now):
+        if not view.menu_visible:
+            self._pill(img, text, RIGHT.right, RIGHT.y + 18, "Menu hidden · hold pinky to show",
+                       theme.PANEL, theme.BORDER, theme.MUTED, 13, align="r")
+            return
+        x = RIGHT.x + 20
+        text.add("Gestures", (x, RIGHT.y + 30), 20, theme.TEXT, True, "lm")
+        text.add("Hold your pinky up to hide", (x, RIGHT.y + 54), 13, theme.MUTED, False, "lm")
+        row_h, top = 78, RIGHT.y + 76
+        for i, (label, title, action) in enumerate(MENU_ROWS):
+            row = Rect(RIGHT.x + 12, top + i * row_h, RIGHT.w - 24, row_h - 8)
+            active = view.confirmed == label and (view.awake or label in (TOGGLE_TRACKING,
+                                                                          TOGGLE_MENU))
+            rounded_rect(img, row, 14, theme.YELLOW_SOFT if active else theme.PANEL_ALT)
+            if active:
+                rounded_rect(img, row, 14, theme.YELLOW, 2)
+            icon = Rect(row.x + 6, row.y + 6, row.h - 12, row.h - 12)
+            rounded_rect(img, icon, 12, theme.PANEL)
+            # draw inside the icon box only, so the demo motion never spills out
+            roi = img[icon.y:icon.bottom, icon.x:icon.right]
+            draw_gesture_icon(roi, (icon.w / 2, icon.h / 2), icon.h * 0.82, label,
+                              now + i * 0.3)
+            tx = icon.right + 12
+            text.add(title, (tx, row.cy - 11), 15, theme.TEXT, True, "lm")
+            text.add(action, (tx, row.cy + 12), 13, theme.MUTED, False, "lm")
 
     def _draw_buttons(self, img, text):
         mx, my = self.mouse

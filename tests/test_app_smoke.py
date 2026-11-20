@@ -127,3 +127,12 @@ def test_tracker_failure_shows_message_instead_of_crashing(fakes, monkeypatch):
 
     monkeypatch.setattr(app, "HandTracker", broken)
     assert app.main(["--max-frames", "3"]) == 1
+
+
+def test_m_key_toggles_menu_and_remembers_it(fakes):
+    fakes.keys.extend([ord("m")])
+    app.main(["--max-frames", "5"])
+    assert Config.load().menu_visible is False
+    fakes.keys.extend([ord("m")])
+    app.main(["--max-frames", "5"])
+    assert Config.load().menu_visible is True

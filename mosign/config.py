@@ -22,6 +22,7 @@ class Config:
     stable_frames: int = 3       # gesture must be steady this many frames to count
     tab_cooldown: float = 1.0    # seconds between tab switches
     hold_seconds: float = 1.0    # how long to hold the special gestures
+    menu_visible: bool = True    # gesture reference menu in the top right
 
     @classmethod
     def load(cls, path=None):
@@ -35,8 +36,11 @@ class Config:
         cfg = cls()
         for f in fields(cls):
             if f.name in data:
+                value = data[f.name]
+                if isinstance(f.default, bool) and not isinstance(value, bool):
+                    continue  # bool("false") would be True; skip junk
                 try:
-                    setattr(cfg, f.name, type(f.default)(data[f.name]))
+                    setattr(cfg, f.name, type(f.default)(value))
                 except (TypeError, ValueError):
                     pass  # keep the default for a bad value
         return cfg
