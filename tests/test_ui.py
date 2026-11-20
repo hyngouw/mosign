@@ -109,3 +109,14 @@ def test_all_gesture_icons_draw():
             img = np.full((80, 80, 3), 250, np.uint8)
             draw_gesture_icon(img, (40, 40), 66, label, t)
             assert (img != 250).any(axis=2).sum() > 300
+
+
+def test_penguin_panel_reacts_to_events():
+    from mosign.ui import LEFT
+    ui = UI()
+    still = ui.render(View(), now=0.0)
+    ui.render(View(events=["next_tab"]), now=0.03)
+    moved = ui.render(View(), now=0.15)
+    region = (slice(LEFT.y, LEFT.bottom), slice(LEFT.x, LEFT.right))
+    assert not np.array_equal(still[region], moved[region])
+    assert ui.penguin.caption.startswith("Waddling")

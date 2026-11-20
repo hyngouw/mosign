@@ -31,7 +31,7 @@ While tracking is off, only the rock-horns gesture is watched for, so you can re
 
 ## The app window
 
-Mosign opens a light-green window that shows your camera with your hand's skeleton drawn on top, plus a "Right now" card that says which gesture it sees and what it's doing. The **Gestures** menu in the top right shows every gesture with a small animated hand, and lights up the one you're doing.
+Mosign opens a light-green window that shows your camera with your hand's skeleton drawn on top, plus a "Right now" card that says which gesture it sees and what it's doing. **Pip the penguin** on the left copies what you do: it hops up while you scroll up, slides down while you scroll down, waddles left or right when you switch tabs, waves when you toggle the menu, and naps while tracking is paused. The **Gestures** menu in the top right shows every gesture with a small animated hand, and lights up the one you're doing.
 
 | Key / button | Action |
 |---|---|

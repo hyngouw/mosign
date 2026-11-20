@@ -32,6 +32,7 @@ from mosign.gestures import (
     TOGGLE_TRACKING,
 )
 from mosign.icons import draw_gesture_icon
+from mosign.penguin import Penguin
 from mosign.tracker import HAND_CONNECTIONS
 
 WIDTH, HEIGHT = 1280, 760
@@ -110,6 +111,7 @@ class UI:
         self.buttons = []
         self._camera_mask = rounded_mask(CAMERA.w, CAMERA.h, 18)
         self._statics = {}
+        self.penguin = Penguin()
 
     # ---------- input ----------
     def on_mouse(self, event, x, y, flags=0, param=None):
@@ -149,7 +151,7 @@ class UI:
         return (view.menu_visible,)
 
     def _static_cards(self, view):
-        cards = [CAMERA, STATUS]
+        cards = [LEFT, CAMERA, STATUS]
         if view.menu_visible:
             cards.append(RIGHT)
         return cards
@@ -180,7 +182,10 @@ class UI:
         if self._toast and now > self._toast[1]:
             self._toast = None
 
+        self.penguin.update(now, view.events, view.scroll_mode, view.awake)
+
         self._draw_header(img, text, view)
+        self._draw_penguin(img, text)
         self._draw_camera(img, text, view)
         self._draw_status(img, text, view)
         self._draw_menu(img, text, view, now)
@@ -231,6 +236,22 @@ class UI:
                            theme.YELLOW, theme.YELLOW_DARK, dot=theme.YELLOW, align="r")
         self._pill(img, text, r.x - 10, 38, view.camera_label, theme.PANEL,
                    theme.BORDER, theme.MUTED, align="r")
+
+    def _draw_penguin(self, img, text):
+        x = LEFT.x + 20
+        text.add("Pip", (x, LEFT.y + 30), 20, theme.TEXT, True, "lm")
+        text.add("copies your gestures", (x, LEFT.y + 54), 13, theme.MUTED, False, "lm")
+        stage = Rect(LEFT.x + 10, LEFT.y + 76, LEFT.w - 20, 404)
+        rounded_rect(img, stage, 16, theme.PANEL_ALT)
+        roi = img[stage.y:stage.bottom, stage.x:stage.right]  # keeps Pip inside
+        feet = (stage.w / 2, stage.h * 0.7)
+        self.penguin.draw_motion_hints(roi, feet)
+        self.penguin.draw(roi, feet)
+        for z, (zx, zy), size in self.penguin.zzz(feet):
+            text.add(z, (stage.x + zx, stage.y + zy), size, theme.MUTED, True, "mm")
+        self._pill(img, text, LEFT.cx, stage.bottom + 34, self.penguin.caption,
+                   theme.YELLOW_SOFT if self.penguin.mood != "idle" else theme.PANEL_ALT,
+                   None, theme.TEXT, 13, align="m")
 
     def camera_fit(self, frame):
         fh, fw = frame.shape[:2]

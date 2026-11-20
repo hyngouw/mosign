@@ -42,6 +42,8 @@ def scenes():
                                   scroll_mode="up", fps=30)
     yield "03_next_tab", View(frame=frame, hand=norm_hand({"index"}, -90), confirmed="next_tab",
                               events=["next_tab"], fps=30)
+    yield "03b_scroll_down", View(frame=frame, hand=norm_hand({"index"}, 180),
+                                  confirmed="scroll_down", scroll_mode="down", fps=30)
     yield "04_holding_sleep", View(frame=frame, hand=norm_hand({"index", "pinky"}),
                                    confirmed="toggle_tracking",
                                    holding=("toggle_tracking", 0.6), fps=30)
@@ -54,10 +56,15 @@ def scenes():
 def main(out=None):
     out = Path(out or ROOT / "build" / "preview")
     out.mkdir(parents=True, exist_ok=True)
-    ui = UI()
     paths = []
     for i, (name, view) in enumerate(scenes()):
-        img = ui.render(view, now=100.0 + i * 10)
+        ui = UI()
+        t = 100.0 + i * 10
+        # play a few frames so Pip is caught mid-move
+        for k in range(12):
+            ui.render(view, now=t + k / 30)
+            view.events = []
+        img = ui.render(view, now=t + 12 / 30)
         path = out / f"{name}.png"
         cv2.imwrite(str(path), img)
         paths.append(path)
