@@ -77,11 +77,7 @@ python --version
 
 It should print `Python 3.12.x`.
 
-If MediaPipe fails to install on an Intel Mac, try an older release:
-
-```bash
-python -m pip install "mediapipe==0.10.14"
-```
+On Intel Macs, `requirements.txt` automatically installs MediaPipe 0.10.14, because newer Intel builds need packages that have to be compiled.
 
 ## macOS permissions
 
