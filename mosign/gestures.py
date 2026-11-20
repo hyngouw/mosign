@@ -47,6 +47,10 @@ SCROLL_UP = "scroll_up"
 SCROLL_DOWN = "scroll_down"
 PREV_TAB = "prev_tab"
 NEXT_TAB = "next_tab"
+TOGGLE_TRACKING = "toggle_tracking"   # the wake / sleep gesture
+
+# Hold a special gesture this long before it counts.
+HOLD_SECONDS = 1.0
 
 # A pointing finger must be at least this long (relative to the palm) to
 # count. Shorter means it's aimed at the camera, so the direction is unclear.
@@ -90,15 +94,26 @@ _DIRECTION_TO_LABEL = {
 }
 
 
+def is_horns_pose(up):
+    """"Rock horns": index + pinky out, middle + ring curled, thumb either way.
+
+    Used to wake / sleep tracking because nobody does it by accident.
+    """
+    return up - {"thumb"} == {"index", "pinky"}
+
+
 def classify_landmarks(lm):
     """Landmarks -> gesture label (or None).
 
     Point your index finger the way you want to go:
     up = scroll up, down = scroll down, left = previous tab, right = next tab.
+    Hold "rock horns" to turn tracking on or off.
     """
     if lm is None:
         return None
     up = fingers_extended(lm)
+    if is_horns_pose(up):
+        return TOGGLE_TRACKING
     if is_pointing_pose(up):
         return _DIRECTION_TO_LABEL.get(pointing_direction(lm))
     return None
@@ -125,3 +140,32 @@ class Stabilizer:
     def reset(self):
         self._history.clear()
         self.confirmed = None
+
+
+class HoldTrigger:
+    """Fires once after a gesture has been held for `seconds`.
+
+    You have to let go before it can fire again, so holding the gesture
+    longer never toggles something twice. `progress` (0..1) is for the
+    on-screen hold ring.
+    """
+
+    def __init__(self, seconds=HOLD_SECONDS):
+        self.seconds = seconds
+        self.progress = 0.0
+        self._start = None
+        self._armed = True
+
+    def update(self, active, now):
+        if not active:
+            self._start = None
+            self._armed = True
+            self.progress = 0.0
+            return False
+        if self._start is None:
+            self._start = now
+        self.progress = min(1.0, (now - self._start) / self.seconds) if self.seconds > 0 else 1.0
+        if self.progress >= 1.0 and self._armed:
+            self._armed = False
+            return True
+        return False

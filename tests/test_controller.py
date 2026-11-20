@@ -1,3 +1,5 @@
+import pytest
+
 from mosign.actions import RecordingActions
 from mosign.controller import Controller
 
@@ -63,3 +65,56 @@ def test_reset_stops_scrolling():
     c.update("scroll_up", 0)
     c.reset()
     assert c.scroll_mode is None and c.last_gesture is None
+
+
+def hold(ctrl, label, seconds, t0, dt=0.033):
+    return feed(ctrl, label, int(seconds / dt) + 1, t0, dt)
+
+
+def test_wake_gesture_toggles_tracking():
+    acts = RecordingActions()
+    c = Controller(acts, stable_frames=3, hold_seconds=1.0)
+    assert c.awake
+    t = hold(c, "toggle_tracking", 0.5, 0)  # too short
+    assert c.awake
+    t = feed(c, None, 5, t)
+    events = []
+    for _ in range(60):  # ~2s hold: toggles exactly once
+        c.update("toggle_tracking", t)
+        events += c.events
+        t += 0.033
+    assert not c.awake and events == ["sleep"]
+
+    # asleep: pointing does nothing
+    t = feed(c, None, 5, t)
+    t = feed(c, "scroll_up", 20, t)
+    t = feed(c, "next_tab", 20, t)
+    assert acts.calls == [] and c.scroll_mode is None
+
+    # hold again: wakes up, and gestures work again
+    t = feed(c, None, 5, t)
+    t = hold(c, "toggle_tracking", 1.2, t)
+    assert c.awake
+    t = feed(c, None, 5, t)
+    feed(c, "scroll_up", 5, t)
+    assert ("scroll", 1) in acts.calls
+
+
+def test_sleep_stops_scrolling_immediately():
+    acts = RecordingActions()
+    c = Controller(acts, stable_frames=1)
+    c.update("scroll_up", 0)
+    c.toggle_awake()
+    n = len(acts.calls)
+    c.update("scroll_up", 0.1)
+    assert len(acts.calls) == n and c.scroll_mode is None
+
+
+def test_holding_reports_progress():
+    c = Controller(RecordingActions(), stable_frames=1, hold_seconds=1.0)
+    c.update("toggle_tracking", 0.0)
+    c.update("toggle_tracking", 0.25)
+    label, progress = c.holding
+    assert label == "toggle_tracking" and progress == pytest.approx(0.25)
+    c.update(None, 0.3)
+    assert c.holding is None

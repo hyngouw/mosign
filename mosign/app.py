@@ -59,9 +59,19 @@ def main(argv=None):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
             cv2.putText(frame, f"Scrolling: {controller.scroll_mode}", (10, 65),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 200, 0), 2)
+            status = "ON" if controller.awake else "SLEEPING (hold rock horns to wake)"
+            cv2.putText(frame, f"Tracking: {status}", (10, 100),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
+            if controller.holding:
+                pct = int(controller.holding[1] * 100)
+                cv2.putText(frame, f"Hold... {pct}%", (10, 135),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
             cv2.imshow("Gesture Control (q to quit)", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
                 break
+            if key == ord("s"):
+                controller.toggle_awake()
     finally:
         tracker.close()
         cap.release()

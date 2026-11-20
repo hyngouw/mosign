@@ -2,6 +2,7 @@ import pytest
 
 from handgen import ALL, make_hand
 from mosign.gestures import (
+    HoldTrigger,
     Stabilizer,
     classify_landmarks,
     fingers_extended,
@@ -69,3 +70,23 @@ def test_stabilizer_needs_steady_frames():
     s.update(None)
     s.update(None)
     assert s.update(None) is None
+
+
+@pytest.mark.parametrize("rotation", [0, 30, 90, 180])
+@pytest.mark.parametrize("thumb", [False, True])
+def test_horns_is_the_wake_gesture(rotation, thumb):
+    fingers = {"index", "pinky"} | ({"thumb"} if thumb else set())
+    assert classify_landmarks(make_hand(fingers, rotation)) == "toggle_tracking"
+
+
+def test_hold_trigger_fires_once_per_hold():
+    h = HoldTrigger(1.0)
+    assert not h.update(True, 0.0)
+    assert not h.update(True, 0.5)
+    assert h.progress == pytest.approx(0.5)
+    assert h.update(True, 1.0)
+    assert not h.update(True, 3.0)   # still holding: no second fire
+    assert not h.update(False, 3.1)  # let go
+    assert h.progress == 0
+    assert not h.update(True, 4.0)
+    assert h.update(True, 5.0)

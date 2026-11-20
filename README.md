@@ -21,9 +21,12 @@ Point your index finger the way you want to go (other fingers curled, thumb eith
 | Point down | Scroll down (keeps going while you point) |
 | Point left | Previous tab (Ctrl+Shift+Tab) |
 | Point right | Next tab (Ctrl+Tab) |
+| Rock horns (index + pinky), hold 1 second | Turn tracking off / back on |
 | Anything else / lower your hand | Stop / no action |
 
 The camera view is mirrored, so "left" means your left.
+
+While tracking is off, only the rock-horns gesture is watched for, so you can rest your hands or talk with them freely. You can also press `s` in the app window.
 
 ## Requirements
 

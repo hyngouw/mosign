@@ -81,3 +81,12 @@ def test_point_right_switches_tab(fakes):
     FakeTracker.hand = make_hand({"index"}, rotation=-90)
     app.main([])
     assert fakes.calls.count(("next_tab",)) == 1
+
+
+def test_horns_puts_app_to_sleep_and_blocks_actions(fakes, monkeypatch):
+    # ~40 fake frames run in well under a second, so speed up the clock
+    clock = iter(i * 0.1 for i in range(10_000))
+    monkeypatch.setattr(app.time, "time", lambda: next(clock))
+    FakeTracker.hand = make_hand({"index", "pinky"})
+    app.main([])
+    assert fakes.calls == []
