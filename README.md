@@ -13,16 +13,17 @@ A gesture must be held steady for a few frames before it counts, which prevents 
 
 ## Gestures
 
-Show one hand to the webcam with your palm facing the camera.
+Point your index finger the way you want to go (other fingers curled, thumb either way).
 
 | Gesture | Action |
 |---|---|
-| Index finger only | Start scrolling up (continues until stopped) |
-| Index + middle finger (peace sign) | Start scrolling down (continues until stopped) |
-| Open palm (all 5 fingers) | Stop scrolling |
-| Index + middle + ring finger | Next tab (Ctrl+Tab) |
-| Thumb + pinky ("hang loose") | Previous tab (Ctrl+Shift+Tab) |
-| Fist or anything else | No action |
+| Point up | Scroll up (keeps going while you point) |
+| Point down | Scroll down (keeps going while you point) |
+| Point left | Previous tab (Ctrl+Shift+Tab) |
+| Point right | Next tab (Ctrl+Tab) |
+| Anything else / lower your hand | Stop / no action |
+
+The camera view is mirrored, so "left" means your left.
 
 ## Requirements
 
@@ -74,4 +75,4 @@ Click on your browser window so it is the active window, then show your gestures
 
 Press `q` in the webcam window to quit, or `Ctrl+C` in the terminal.
 
-**Emergency stop:** move your mouse into a
+**Emergency stop:** move your mouse into a corner of the screen (PyAutoGUI failsafe).

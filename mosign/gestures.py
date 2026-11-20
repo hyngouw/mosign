@@ -42,25 +42,66 @@ def fingers_extended(lm):
     return up
 
 
-def classify(up):
-    if up == {"index"}:
-        return "scroll_up"
-    if up == {"index", "middle"}:
-        return "scroll_down"
-    if up == {"thumb", "index", "middle", "ring", "pinky"}:
-        return "stop"
-    if up == {"index", "middle", "ring"}:
-        return "next_tab"
-    if up == {"thumb", "pinky"}:
-        return "prev_tab"
+# Labels the rest of the app understands
+SCROLL_UP = "scroll_up"
+SCROLL_DOWN = "scroll_down"
+PREV_TAB = "prev_tab"
+NEXT_TAB = "next_tab"
+
+# A pointing finger must be at least this long (relative to the palm) to
+# count. Shorter means it's aimed at the camera, so the direction is unclear.
+MIN_POINT_LENGTH = 0.45
+
+
+def is_pointing_pose(up):
+    """Only the index finger is out. The thumb may be either way."""
+    return up - {"thumb"} == {"index"}
+
+
+def pointing_direction(lm):
+    """Which way the index finger points on screen: up/down/left/right/None.
+
+    Uses the line from the index knuckle (5) to the index tip (8). Angles
+    near a diagonal return None so the gesture never flickers between two
+    directions.
+    """
+    vx = lm[8][0] - lm[5][0]
+    vy = lm[8][1] - lm[5][1]
+    palm = dist(lm[WRIST], lm[9]) or 1e-6
+    if math.hypot(vx, vy) / palm < MIN_POINT_LENGTH:
+        return None
+    angle = math.degrees(math.atan2(-vy, vx))  # 0 = right, 90 = up
+    if -35 <= angle <= 35:
+        return "right"
+    if 55 <= angle <= 125:
+        return "up"
+    if angle >= 145 or angle <= -145:
+        return "left"
+    if -125 <= angle <= -55:
+        return "down"
     return None
 
 
+_DIRECTION_TO_LABEL = {
+    "up": SCROLL_UP,
+    "down": SCROLL_DOWN,
+    "left": PREV_TAB,    # the camera image is mirrored, so this is YOUR left
+    "right": NEXT_TAB,
+}
+
+
 def classify_landmarks(lm):
-    """Landmarks -> gesture label (or None)."""
+    """Landmarks -> gesture label (or None).
+
+    Point your index finger the way you want to go:
+    up = scroll up, down = scroll down, left = previous tab, right = next tab.
+    """
     if lm is None:
         return None
-    return classify(fingers_extended(lm))
+    up = fingers_extended(lm)
+    if is_pointing_pose(up):
+        return _DIRECTION_TO_LABEL.get(pointing_direction(lm))
+    return None
 
 
 class Stabilizer:

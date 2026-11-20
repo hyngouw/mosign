@@ -72,6 +72,12 @@ def fakes(monkeypatch):
 
 
 def test_main_loop_runs_and_scrolls(fakes):
-    FakeTracker.hand = make_hand({"index"})  # old mapping: index only = scroll up
+    FakeTracker.hand = make_hand({"index"})  # index pointing up = scroll up
     assert app.main(["--camera", "0"]) == 0
     assert any(c[0] == "scroll" and c[1] > 0 for c in fakes.calls)
+
+
+def test_point_right_switches_tab(fakes):
+    FakeTracker.hand = make_hand({"index"}, rotation=-90)
+    app.main([])
+    assert fakes.calls.count(("next_tab",)) == 1

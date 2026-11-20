@@ -1,7 +1,12 @@
 import pytest
 
 from handgen import ALL, make_hand
-from mosign.gestures import Stabilizer, classify, fingers_extended
+from mosign.gestures import (
+    Stabilizer,
+    classify_landmarks,
+    fingers_extended,
+    pointing_direction,
+)
 
 
 @pytest.mark.parametrize("rotation", [0, 45, 90, 180, -90])
@@ -13,13 +18,44 @@ def test_fingers_extended_any_rotation(fingers, rotation):
     assert fingers_extended(make_hand(fingers, rotation)) == fingers
 
 
-def test_classify_known_gestures():
-    assert classify({"index"}) == "scroll_up"
-    assert classify({"index", "middle"}) == "scroll_down"
-    assert classify(ALL) == "stop"
-    assert classify({"index", "middle", "ring"}) == "next_tab"
-    assert classify({"thumb", "pinky"}) == "prev_tab"
-    assert classify(set()) is None
+@pytest.mark.parametrize("thumb", [False, True])
+@pytest.mark.parametrize("rotation,label", [
+    (0, "scroll_up"),       # finger points up
+    (15, "scroll_up"),      # a little tilt is fine
+    (180, "scroll_down"),   # finger points down
+    (-165, "scroll_down"),
+    (90, "prev_tab"),       # finger points left
+    (-90, "next_tab"),      # finger points right
+])
+def test_point_direction_maps_to_action(rotation, label, thumb):
+    fingers = {"index", "thumb"} if thumb else {"index"}
+    assert classify_landmarks(make_hand(fingers, rotation)) == label
+
+
+def test_diagonal_point_is_ignored():
+    assert classify_landmarks(make_hand({"index"}, 45)) is None
+    assert classify_landmarks(make_hand({"index"}, -135)) is None
+
+
+def test_finger_aimed_at_camera_is_ignored():
+    hand = make_hand({"index"}, 0)
+    # squash the index finger toward its knuckle (foreshortened)
+    kx, ky = hand[5]
+    for i in (6, 7, 8):
+        x, y = hand[i]
+        hand[i] = (kx + (x - kx) * 0.3, ky + (y - ky) * 0.3)
+    assert pointing_direction(hand) is None
+
+
+@pytest.mark.parametrize("fingers", [
+    set(), ALL, {"index", "middle"}, {"index", "middle", "ring"}, {"thumb", "pinky"},
+])
+def test_other_poses_do_nothing(fingers):
+    assert classify_landmarks(make_hand(fingers)) is None
+
+
+def test_no_hand():
+    assert classify_landmarks(None) is None
 
 
 def test_stabilizer_needs_steady_frames():

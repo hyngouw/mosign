@@ -10,16 +10,38 @@ def feed(ctrl, label, n, t0=0.0, dt=0.033):
     return t
 
 
-def test_scroll_keeps_going_until_stop():
+def scrolls(acts):
+    return [c[1] for c in acts.calls if c[0] == "scroll"]
+
+
+def test_scrolls_only_while_pointing():
     acts = RecordingActions()
     c = Controller(acts, scroll_amount=2, stable_frames=3)
-    t = feed(c, "scroll_up", 3)
+    t = feed(c, "scroll_up", 10)
     assert c.scroll_mode == "up"
-    t = feed(c, None, 5, t)  # hand gone: still scrolling (old behaviour)
-    assert c.scroll_mode == "up"
-    feed(c, "stop", 3, t)
+    assert scrolls(acts) == [2] * 8  # starts once the pose is steady (frame 3)
+    t = feed(c, None, 3, t)          # finger lowered -> stops
     assert c.scroll_mode is None
-    assert ("scroll", 2) in acts.calls
+    n = len(scrolls(acts))
+    feed(c, None, 10, t)
+    assert len(scrolls(acts)) == n
+
+
+def test_point_down_scrolls_down():
+    acts = RecordingActions()
+    c = Controller(acts, scroll_amount=3, stable_frames=2)
+    feed(c, "scroll_down", 5)
+    assert set(scrolls(acts)) == {-3}
+    assert c.scroll_mode == "down"
+
+
+def test_scroll_start_event_fires_once():
+    c = Controller(RecordingActions(), stable_frames=2)
+    seen = []
+    for i in range(6):
+        c.update("scroll_up", i * 0.03)
+        seen += c.events
+    assert seen == ["scroll_up"]
 
 
 def test_tab_fires_once_and_respects_cooldown():
@@ -33,3 +55,11 @@ def test_tab_fires_once_and_respects_cooldown():
     feed(c, None, 3, 5.0)
     feed(c, "prev_tab", 3, 6.0)
     assert ("prev_tab",) in acts.calls
+    assert not scrolls(acts)
+
+
+def test_reset_stops_scrolling():
+    c = Controller(RecordingActions(), stable_frames=1)
+    c.update("scroll_up", 0)
+    c.reset()
+    assert c.scroll_mode is None and c.last_gesture is None
