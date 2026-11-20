@@ -30,6 +30,8 @@ def parse_args(argv=None):
     parser.add_argument("--tour", action="store_true", help="run the quick tour again")
     parser.add_argument("--skip-tour", action="store_true",
                         help="skip the first-run tour (e.g. if the camera can't see you)")
+    parser.add_argument("--self-test", action="store_true",
+                        help="check the install (no camera or window needed) and exit")
     parser.add_argument("--max-frames", type=int, default=None, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
@@ -60,6 +62,39 @@ def show_fatal(title, message, max_frames=None):
     cv2.destroyAllWindows()
 
 
+def self_test():
+    """Check that everything a packaged app needs is present. Exit code 0 = OK."""
+    import mosign
+    from mosign import tracker as tracker_mod
+    from mosign.ui import UI, View
+
+    ok = True
+    print(f"Mosign {mosign.__version__} self-test")
+    try:
+        import mediapipe
+        print(f"  ok   mediapipe {getattr(mediapipe, '__version__', '?')}, opencv {cv2.__version__}")
+    except Exception as exc:
+        print(f"  FAIL import mediapipe: {exc}")
+        return 1
+    try:
+        img = UI().render(View(), now=0.0)
+        assert img.shape == (HEIGHT, WIDTH, 3)
+        print("  ok   window renders")
+    except Exception as exc:
+        print(f"  FAIL window render: {exc}")
+        ok = False
+    print(f"  info model file: {tracker_mod.find_model() or 'not bundled (downloads on first run)'}")
+    try:
+        t = HandTracker()
+        print(f"  ok   hand tracker ({t.backend} API)")
+        t.close()
+    except Exception as exc:
+        print(f"  FAIL hand tracker: {exc}")
+        ok = False
+    print("PASSED" if ok else "FAILED")
+    return 0 if ok else 1
+
+
 class FpsCounter:
     def __init__(self):
         self.fps = 0.0
@@ -75,6 +110,8 @@ class FpsCounter:
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.self_test:
+        return self_test()
     cfg = Config.load()
     if args.camera is not None:
         cfg.camera_index = args.camera

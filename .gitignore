@@ -8,3 +8,6 @@ build/
 dist/
 models/*.task
 .DS_Store
+.venv-build/
+packaging/*.icns
+packaging/*.iconset/

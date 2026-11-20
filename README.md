@@ -1,5 +1,7 @@
 # Mosign
 
+<img src="packaging/icon.png" width="96" align="right" alt="Mosign icon">
+
 A Python program that uses your webcam to control a web browser with hand gestures. You can scroll up and down, stop scrolling, and switch tabs without touching the keyboard or mouse.
 
 ## How it works
@@ -54,7 +56,7 @@ Settings are saved in `~/.mosign/config.json` (camera, scroll speed, hold time, 
 ## Requirements
 
 - macOS (Intel or Apple Silicon)
-- Python 3.9 to 3.12 (MediaPipe does not install on newer versions such as 3.13+)
+- Python 3.12 recommended (3.9+ works; Mosign supports both the old and the new MediaPipe API)
 - A webcam
 
 ## Setup
@@ -94,11 +96,37 @@ Quit and reopen the terminal afterward.
 
 ```bash
 source gestures/bin/activate
-python gesture_control.py
+python gesture_control.py      # or: python -m mosign
 ```
+
+With newer MediaPipe versions, the first run downloads a small hand model (about 8 MB) to `~/.mosign/models`.
 
 Click on your browser window so it is the active window, then show your gestures to the camera.
 
-Press `q` in the webcam window to quit, or `Ctrl+C` in the terminal.
+Press `Q` in the Mosign window to quit, or `Ctrl+C` in the terminal.
+
+Options: `--camera N` (start with camera N), `--tour` (replay the tour), `--skip-tour`, `--self-test`.
 
 **Emergency stop:** move your mouse into a corner of the screen (PyAutoGUI failsafe).
+
+## Share it as an app (no Terminal needed)
+
+Build a double-clickable `Mosign.app` plus a `.dmg` installer that bundles Python and every library, so the people you share it with don't install anything:
+
+```bash
+./scripts/build_mac.sh
+```
+
+See [PACKAGING.md](PACKAGING.md) for details, the Windows build, and the permission steps to tell users about.
+
+## Development
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q                 # tests (no camera needed)
+python scripts/preview_ui.py        # render the window to build/preview/*.png
+python -m mosign --self-test        # check the install
+```
+
+Code layout: `mosign/gestures.py` (gesture rules), `controller.py` (gestures to actions), `onboarding.py` (tour), `ui.py` / `penguin.py` / `icons.py` (drawing), `tracker.py` (MediaPipe), `camera.py`, `config.py`, `app.py` (main loop).
+
