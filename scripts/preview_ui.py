@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
 from handgen import make_hand  # noqa: E402
+from mosign.onboarding import Onboarding  # noqa: E402
 from mosign.ui import UI, View  # noqa: E402
 
 
@@ -35,8 +36,28 @@ def norm_hand(fingers, rotation=0, w=1280, h=720):
     return [(x / aspect, y) for x, y in pts]
 
 
+def tour_at(index, progress=0.0, between=False, done=False, now=0.0):
+    tour = Onboarding()
+    tour.index = index
+    tour.progress = progress
+    if between:
+        tour._paused_until = now + 10
+    if done:
+        tour.index, tour.done, tour.finished_at = tour.total, True, now
+    return tour
+
+
 def scenes():
     frame = fake_frame()
+    yield "00_tour_start", View(frame=frame, tour=tour_at(0, 0.3), tour_required=True,
+                                hand=norm_hand({"thumb", "index", "middle", "ring", "pinky"}))
+    yield "00b_tour_scroll_down", View(frame=frame, hand=norm_hand({"index"}, 180),
+                                       confirmed="scroll_down", scroll_mode="down",
+                                       tour=tour_at(2, 0.55), tour_required=True)
+    yield "00c_tour_between", View(frame=frame, tour=tour_at(5, between=True, now=130),
+                                   tour_required=True)
+    yield "00d_tour_done", View(frame=frame, tour=tour_at(0, done=True, now=130),
+                                events=["celebrate"])
     yield "01_idle", View(frame=frame, fps=30)
     yield "02_scrolling_up", View(frame=frame, hand=norm_hand({"index"}), confirmed="scroll_up",
                                   scroll_mode="up", fps=30)

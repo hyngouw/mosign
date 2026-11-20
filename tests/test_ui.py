@@ -120,3 +120,33 @@ def test_penguin_panel_reacts_to_events():
     region = (slice(LEFT.y, LEFT.bottom), slice(LEFT.x, LEFT.right))
     assert not np.array_equal(still[region], moved[region])
     assert ui.penguin.caption.startswith("Waddling")
+
+
+def test_tour_card_replaces_status_and_highlights_menu_row():
+    from mosign.onboarding import Onboarding
+    from mosign.ui import STATUS
+    ui = UI()
+    tour = Onboarding()
+    tour.index = 3  # "point left"
+    normal = ui.render(View(), now=0)
+    touring = ui.render(View(tour=tour, tour_required=True), now=0)
+    region = (slice(STATUS.y, STATUS.bottom), slice(STATUS.x, STATUS.right))
+    assert not np.array_equal(normal[region], touring[region])
+    labels = [b.command for b in ui.buttons]
+    assert "tour" not in labels  # can't skip on first run
+    ui.render(View(tour=tour, tour_required=False), now=0)
+    assert any(b.label == "End tour" for b in ui.buttons)
+    ui.render(View(), now=0)
+    assert any(b.label == "Replay tour" for b in ui.buttons)
+
+
+def test_hand_outside_frame_is_clipped_to_camera():
+    from mosign.ui import CAMERA, STATUS
+    ui = UI()
+    frame = np.zeros((360, 640, 3), np.uint8)
+    far = [(0.5, 1.6)] * 21   # way below the frame
+    a = ui.render(View(frame=frame), now=0)
+    b = ui.render(View(frame=frame, hand=far), now=0)
+    # the gap between the camera and the status card must stay untouched
+    below = (slice(CAMERA.bottom, STATUS.y), slice(CAMERA.x, CAMERA.right))
+    assert np.array_equal(a[below], b[below])

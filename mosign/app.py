@@ -5,11 +5,12 @@ import time
 
 import cv2
 
-from mosign.actions import PyAutoGuiActions
+from mosign.actions import PyAutoGuiActions, RecordingActions
 from mosign.camera import Camera
 from mosign.config import Config
 from mosign.controller import Controller
 from mosign.gestures import classify_landmarks
+from mosign.onboarding import Onboarding
 from mosign.tracker import HandTracker, to_gesture_space
 from mosign.ui import HEIGHT, UI, WIDTH, WINDOW_TITLE, View, render_message
 
@@ -17,6 +18,7 @@ KEY_COMMANDS = {
     ord("c"): "swap_camera",
     ord("s"): "toggle_tracking",
     ord("m"): "toggle_menu",
+    ord("o"): "tour",
     ord("q"): "quit",
 }
 
@@ -25,6 +27,9 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Control your browser with hand gestures.")
     parser.add_argument("--camera", type=int, default=None,
                         help="camera index to start with (default: last used)")
+    parser.add_argument("--tour", action="store_true", help="run the quick tour again")
+    parser.add_argument("--skip-tour", action="store_true",
+                        help="skip the first-run tour (e.g. if the camera can't see you)")
     parser.add_argument("--max-frames", type=int, default=None, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
 
@@ -81,8 +86,9 @@ def main(argv=None):
         return 1
 
     camera = Camera(cfg.camera_index)
+    real_actions = PyAutoGuiActions()
     controller = Controller(
-        PyAutoGuiActions(),
+        real_actions,
         scroll_amount=cfg.scroll_amount,
         stable_frames=cfg.stable_frames,
         tab_cooldown=cfg.tab_cooldown,
@@ -91,6 +97,31 @@ def main(argv=None):
     )
     ui = UI()
     fps = FpsCounter()
+
+    tour = None
+    tour_required = False
+
+    def start_tour(required=False):
+        """Practice mode: recognise everything, send nothing to the browser."""
+        nonlocal tour, tour_required
+        tour = Onboarding()
+        tour_required = required
+        controller.actions = RecordingActions()
+        controller.set_awake(True)
+        if not controller.menu_visible:
+            controller.toggle_menu()
+
+    def end_tour():
+        nonlocal tour_required
+        controller.actions = real_actions
+        tour_required = False
+
+    if args.skip_tour and not cfg.onboarding_complete:
+        cfg.onboarding_complete = True
+        cfg.save()
+    if args.tour or not cfg.onboarding_complete:
+        start_tour(required=not cfg.onboarding_complete)
+    last_now = None
 
     open_window()
     cv2.setMouseCallback(WINDOW_TITLE, ui.on_mouse)
@@ -107,6 +138,22 @@ def main(argv=None):
                     h, w = frame.shape[:2]
                     raw = classify_landmarks(to_gesture_space(norm, w, h))
             controller.update(raw, now)
+            events = list(controller.events)
+
+            if tour is not None and not tour.done:
+                dt = 0.0 if last_now is None else min(0.1, now - last_now)
+                result = tour.update(now, dt, hand_present=norm is not None,
+                                     scroll_mode=controller.scroll_mode, events=events)
+                if result == "step":
+                    controller.last_tab_time = float("-inf")  # no cooldown between steps
+                elif result == "done":
+                    end_tour()
+                    cfg.onboarding_complete = True
+                    cfg.save()
+                    events.append("celebrate")
+            if tour is not None and tour.done and not tour.celebrating(now):
+                tour = None
+            last_now = now
 
             view = View(
                 frame=frame,
@@ -115,10 +162,12 @@ def main(argv=None):
                 awake=controller.awake,
                 holding=controller.holding,
                 scroll_mode=controller.scroll_mode,
-                events=list(controller.events),
+                events=events,
                 camera_label=camera.label,
                 fps=fps.tick(now),
                 menu_visible=controller.menu_visible,
+                tour=tour,
+                tour_required=tour_required,
             )
             cv2.imshow(WINDOW_TITLE, ui.render(view, now))
 
@@ -142,6 +191,14 @@ def main(argv=None):
                     controller.toggle_awake()
                 elif cmd == "toggle_menu":
                     controller.toggle_menu()
+                elif cmd == "tour":
+                    if tour is not None and tour.step is not None:
+                        if not tour_required:
+                            end_tour()
+                            tour = None
+                            ui.toast("Tour ended", now)
+                    else:
+                        start_tour()
 
             if controller.menu_visible != cfg.menu_visible:
                 cfg.menu_visible = controller.menu_visible

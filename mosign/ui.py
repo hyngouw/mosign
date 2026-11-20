@@ -15,6 +15,7 @@ from mosign.draw import (
     TextLayer,
     blend_rect,
     card,
+    check_mark,
     ipt,
     paste,
     progress_bar,
@@ -22,6 +23,7 @@ from mosign.draw import (
     rounded_mask,
     rounded_rect,
     soft_shadow,
+    wrap_text,
 )
 from mosign.gestures import (
     NEXT_TAB,
@@ -31,7 +33,7 @@ from mosign.gestures import (
     TOGGLE_MENU,
     TOGGLE_TRACKING,
 )
-from mosign.icons import draw_gesture_icon
+from mosign.icons import draw_gesture_icon, draw_hand_icon
 from mosign.penguin import Penguin
 from mosign.tracker import HAND_CONNECTIONS
 
@@ -92,6 +94,8 @@ class View:
     camera_label: str = "Camera 0"
     fps: float = 0.0
     menu_visible: bool = True
+    tour: object = None             # Onboarding while the tour runs / celebrates
+    tour_required: bool = False     # first run: the tour can't be skipped
 
 
 @dataclass
@@ -161,8 +165,13 @@ class UI:
             Button("swap_camera", "Swap camera", "C"),
             Button("toggle_tracking", "Pause tracking" if view.awake else "Resume tracking", "S"),
             Button("toggle_menu", "Hide menu" if view.menu_visible else "Show menu", "M"),
-            Button("quit", "Quit", "Q"),
         ]
+        if view.tour is not None and view.tour.step is not None:
+            if not view.tour_required:
+                buttons.append(Button("tour", "End tour", "O"))
+        else:
+            buttons.append(Button("tour", "Replay tour", "O"))
+        buttons.append(Button("quit", "Quit", "Q"))
         x = BAR.x
         for b in buttons:
             w = TextLayer.measure(b.label, 16, True)[0] + 76
@@ -187,7 +196,8 @@ class UI:
         self._draw_header(img, text, view)
         self._draw_penguin(img, text)
         self._draw_camera(img, text, view)
-        self._draw_status(img, text, view)
+        if not self._draw_tour(img, text, view, now):
+            self._draw_status(img, text, view)
         self._draw_menu(img, text, view, now)
         self.buttons = self._layout_buttons(view)
         self._draw_buttons(img, text)
@@ -282,14 +292,22 @@ class UI:
             blend_rect(img, CAMERA, theme.BG, 0.55)
 
         if view.hand is not None:
-            pts = [(CAMERA.x + ox + x * nw, CAMERA.y + oy + y * nh) for x, y in view.hand]
-            self._draw_hand(img, pts, dim=not view.awake)
+            # draw in camera-local coordinates on a view of the camera area, so
+            # points outside the frame (MediaPipe allows that) are clipped
+            cam = img[CAMERA.y:CAMERA.bottom, CAMERA.x:CAMERA.right]
+            pts = [(ox + x * nw, oy + y * nh) for x, y in view.hand]
+            self._draw_hand(cam, pts, dim=not view.awake)
             if view.holding:
                 palm = [pts[i] for i in (0, 5, 9, 13, 17)]
                 cx = sum(p[0] for p in palm) / 5
                 cy = sum(p[1] for p in palm) / 5
                 size = np.hypot(pts[0][0] - pts[9][0], pts[0][1] - pts[9][1])
-                ring(img, (cx, cy), max(40, min(110, size * 1.1)), view.holding[1])
+                ring(cam, (cx, cy), max(40, min(110, size * 1.1)), view.holding[1])
+            # restore the rounded corners the skeleton may have painted over
+            corner = (self._camera_mask < 0.999)[..., 0]
+            cam[corner] = (cam[corner] * self._camera_mask[corner] +
+                           np.array(theme.BG, np.float32) * (1 - self._camera_mask[corner])
+                           ).astype(np.uint8)
 
         if not view.awake:
             banner = Rect(CAMERA.cx - 210, CAMERA.y + 18, 420, 68)
@@ -345,6 +363,64 @@ class UI:
             text.add(f"{view.fps:.0f} fps", (STATUS.right - 24, y + 26), 13, theme.MUTED,
                      False, "rm")
 
+    def _draw_tour(self, img, text, view, now):
+        """Tour card in place of the status card. Returns False if no tour."""
+        tour = view.tour
+        if tour is None or not (tour.step is not None or tour.celebrating(now)):
+            return False
+        x, y = STATUS.x, STATUS.y
+        icon = Rect(x + 20, y + 20, 142, 142)
+        rounded_rect(img, icon, 18, theme.PANEL_ALT)
+        tx = icon.right + 22
+        wrap_w = STATUS.right - tx - 24
+
+        if tour.done:
+            check_mark(img, (icon.cx, icon.cy), 44)
+            text.add("QUICK TOUR · COMPLETE", (tx, y + 30), 13, theme.MUTED, True, "lm")
+            self._pill(img, text, STATUS.right - 20, y + 30, "Live", theme.GREEN, None,
+                       theme.WHITE, 13, align="r")
+            title = "You're all set!"
+            body = "Gestures now control your browser. Click your browser window and try it."
+        elif tour.between_steps(now):
+            check_mark(img, (icon.cx, icon.cy), 44)
+            text.add(f"QUICK TOUR · STEP {tour.index} OF {tour.total}", (tx, y + 30), 13,
+                     theme.MUTED, True, "lm")
+            title = "Nice!"
+            nxt = tour.text_for(tour.step.title, view.menu_visible, view.awake)
+            body = f"Next: {nxt}"
+        else:
+            step = tour.step
+            box = img[icon.y:icon.bottom, icon.x:icon.right]  # clip the demo motion
+            if step.icon:
+                draw_gesture_icon(box, (icon.w / 2, icon.h / 2), 118, step.icon, now)
+            else:
+                draw_hand_icon(box, (icon.w / 2, icon.h / 2 + 8), 100,
+                               {"thumb", "index", "middle", "ring", "pinky"})
+            text.add(f"QUICK TOUR · STEP {tour.index + 1} OF {tour.total}", (tx, y + 30), 13,
+                     theme.MUTED, True, "lm")
+            self._pill(img, text, STATUS.right - 20, y + 30, "Practice mode", theme.YELLOW_SOFT,
+                       theme.YELLOW, theme.YELLOW_DARK, 13, align="r")
+            title = tour.text_for(step.title, view.menu_visible, view.awake)
+            body = tour.text_for(step.instruction, view.menu_visible, view.awake)
+            if step.kind in ("hand", "scroll"):
+                progress_bar(img, Rect(tx, y + 132, min(320, wrap_w), 10), tour.progress)
+
+        text.add(title, (tx, y + 64), 24, theme.TEXT, True, "lm")
+        for i, line in enumerate(wrap_text(body, 15, wrap_w)[:2]):
+            text.add(line, (tx, y + 96 + i * 20), 15, theme.MUTED, False, "lm")
+
+        # progress dots
+        for i in range(tour.total):
+            c = (tx + 6 + i * 20, y + 158)
+            if i < tour.index:
+                color = theme.GREEN
+            elif i == tour.index and not tour.done:
+                color = theme.YELLOW
+            else:
+                color = theme.BORDER
+            cv2.circle(img, c, 6, color, -1, cv2.LINE_AA)
+        return True
+
     def _draw_menu(self, img, text, view, now):
         if not view.menu_visible:
             self._pill(img, text, RIGHT.right, RIGHT.y + 18, "Menu hidden · hold pinky to show",
@@ -358,8 +434,10 @@ class UI:
             row = Rect(RIGHT.x + 12, top + i * row_h, RIGHT.w - 24, row_h - 8)
             active = view.confirmed == label and (view.awake or label in (TOGGLE_TRACKING,
                                                                           TOGGLE_MENU))
+            step = view.tour.step if view.tour is not None else None
+            target = step is not None and step.icon == label
             rounded_rect(img, row, 14, theme.YELLOW_SOFT if active else theme.PANEL_ALT)
-            if active:
+            if active or target:
                 rounded_rect(img, row, 14, theme.YELLOW, 2)
             icon = Rect(row.x + 6, row.y + 6, row.h - 12, row.h - 12)
             rounded_rect(img, icon, 12, theme.PANEL)
@@ -399,16 +477,7 @@ def render_message(title, body):
     card(img, box)
     text = TextLayer()
     text.add(title, (box.cx, box.y + 60), 26, theme.TEXT, True, "mm")
-    words, lines, line = body.split(), [], ""
-    for word in words:
-        trial = f"{line} {word}".strip()
-        if TextLayer.measure(trial, 16)[0] > box.w - 80:
-            lines.append(line)
-            line = word
-        else:
-            line = trial
-    lines.append(line)
-    for i, ln in enumerate(lines[:6]):
+    for i, ln in enumerate(wrap_text(body, 16, box.w - 80)[:6]):
         text.add(ln, (box.cx, box.y + 110 + i * 24), 16, theme.MUTED, False, "mm")
     text.add("Press Q to quit", (box.cx, box.bottom - 30), 14, theme.GREEN_DARK, True, "mm")
     text.flush(img)

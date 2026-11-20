@@ -29,6 +29,14 @@ The camera view is mirrored, so "left" means your left.
 
 While tracking is off, only the rock-horns gesture is watched for, so you can rest your hands or talk with them freely.
 
+## Quick tour (first run)
+
+The first time you open Mosign it walks you through every control: show your hand, point up, down, left and right, hide and show the menu, then pause and resume tracking. Each step only finishes when you actually do the gesture, so by the end you've used every control at least once.
+
+During the tour the app is in **practice mode**: gestures are recognised and Pip reacts, but nothing is sent to your browser. When you finish, gestures go live and the tour won't appear again. Replay it any time with `O` or **Replay tour**.
+
+If your camera can't see you and you need to get past the tour, start the app with `--skip-tour`.
+
 ## The app window
 
 Mosign opens a light-green window that shows your camera with your hand's skeleton drawn on top, plus a "Right now" card that says which gesture it sees and what it's doing. **Pip the penguin** on the left copies what you do: it hops up while you scroll up, slides down while you scroll down, waddles left or right when you switch tabs, waves when you toggle the menu, and naps while tracking is paused. The **Gestures** menu in the top right shows every gesture with a small animated hand, and lights up the one you're doing.
@@ -38,6 +46,7 @@ Mosign opens a light-green window that shows your camera with your hand's skelet
 | `C` / **Swap camera** | Switch to the next working camera (remembered next time) |
 | `S` / **Pause tracking** | Pause or resume tracking |
 | `M` / **Hide menu** | Hide or show the gesture menu |
+| `O` / **Replay tour** | Run the quick tour again (or end a replayed tour) |
 | `Q` / **Quit** | Quit |
 
 Settings are saved in `~/.mosign/config.json` (camera, scroll speed, hold time, etc.).

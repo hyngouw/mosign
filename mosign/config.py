@@ -23,6 +23,7 @@ class Config:
     tab_cooldown: float = 1.0    # seconds between tab switches
     hold_seconds: float = 1.0    # how long to hold the special gestures
     menu_visible: bool = True    # gesture reference menu in the top right
+    onboarding_complete: bool = False  # first-run tour finished
 
     @classmethod
     def load(cls, path=None):

@@ -122,6 +122,30 @@ def ring(img, center, radius, progress, color=theme.YELLOW, track=theme.WHITE, t
                     color, thickness, AA)
 
 
+def wrap_text(text, size, width, bold=False):
+    """Split text into lines that fit `width` pixels."""
+    lines, line = [], ""
+    for word in text.split():
+        trial = f"{line} {word}".strip()
+        if line and TextLayer.measure(trial, size, bold)[0] > width:
+            lines.append(line)
+            line = word
+        else:
+            line = trial
+    if line:
+        lines.append(line)
+    return lines
+
+
+def check_mark(img, center, radius, color=theme.GREEN, mark=theme.WHITE):
+    cx, cy = center
+    cv2.circle(img, ipt(center), int(radius), color, -1, AA)
+    r = radius
+    pts = np.array([ipt((cx - 0.45 * r, cy + 0.02 * r)), ipt((cx - 0.12 * r, cy + 0.35 * r)),
+                    ipt((cx + 0.5 * r, cy - 0.3 * r))], np.int32)
+    cv2.polylines(img, [pts], False, mark, max(3, int(r * 0.18)), AA)
+
+
 class TextLayer:
     """Collects text for one frame, then draws it all in one Pillow pass.
 

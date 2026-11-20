@@ -23,6 +23,7 @@ PUPIL = theme.bgr("#1B2428")
 
 MAX_X = 36      # how far Pip may move from the middle, in pixels
 MAX_Y = 95
+CELEBRATE_WAVE = 2.5
 STIFFNESS = 110.0
 DAMPING = 13.0
 
@@ -35,6 +36,7 @@ CAPTIONS = {
     "sleep": "Napping… zzz",
     "wake": "Awake!",
     "wave": "Waving at you",
+    "party": "Yay! You're ready",
 }
 
 
@@ -79,6 +81,10 @@ class Penguin:
             elif event == "wake":
                 self.vy -= 650
                 self._set_mood("wake", now, 1.2)
+            elif event == "celebrate":
+                self.vy -= 700
+                self._wave_until = now + CELEBRATE_WAVE
+                self._set_mood("party", now, CELEBRATE_WAVE)
             elif event in ("menu_on", "menu_off"):
                 self._wave_until = now + 1.0
                 self._set_mood("wave", now)
@@ -200,8 +206,8 @@ class Penguin:
                 y = cy - (95 + 18 * i + 14 * phase) * scale
                 self._chevron(img, (cx, y), 0, color, scale)
         elif self.mood == "down":
-            for i in range(2):
-                y = cy + (95 + 18 * i + 14 * phase) * scale
+            for i in range(2):  # above the head too, so it never gets clipped
+                y = cy - (110 - 18 * i - 14 * phase) * scale
                 self._chevron(img, (cx, y), 180, color, scale)
         elif self.mood in ("left", "right"):
             d = -1 if self.mood == "left" else 1

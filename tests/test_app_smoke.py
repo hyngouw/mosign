@@ -39,7 +39,11 @@ class FakeTracker:
     def __init__(self, *a, **k):
         self.backend = "fake"
 
+    script = None  # optional list of hands, one per frame
+
     def process(self, frame):
+        if FakeTracker.script is not None:
+            FakeTracker.hand = FakeTracker.script.pop(0) if FakeTracker.script else None
         if FakeTracker.hand is None:
             return None
         h, w = frame.shape[:2]
@@ -52,9 +56,11 @@ class FakeTracker:
 
 @pytest.fixture
 def fakes(monkeypatch):
+    Config(onboarding_complete=True).save()  # most tests skip the tour
     recorder = RecordingActions()
     FakeCapture.opened = []
     FakeTracker.hand = None
+    FakeTracker.script = None
     monkeypatch.setattr("mosign.camera.cv2.VideoCapture", FakeCapture)
     monkeypatch.setattr(app, "HandTracker", FakeTracker)
     monkeypatch.setattr(app, "PyAutoGuiActions", lambda: recorder)
@@ -136,3 +142,70 @@ def test_m_key_toggles_menu_and_remembers_it(fakes):
     fakes.keys.extend([ord("m")])
     app.main(["--max-frames", "5"])
     assert Config.load().menu_visible is True
+
+
+def first_run():
+    Config(onboarding_complete=False).save()
+
+
+def test_first_run_is_practice_mode(fakes):
+    first_run()
+    FakeTracker.hand = make_hand({"index"})
+    app.main(["--max-frames", "60"])
+    assert fakes.calls == []           # nothing reached the browser
+    assert not Config.load().onboarding_complete
+
+
+def test_skip_tour_flag(fakes):
+    first_run()
+    FakeTracker.hand = make_hand({"index"})
+    app.main(["--max-frames", "30", "--skip-tour"])
+    assert any(c[0] == "scroll" for c in fakes.calls)
+    assert Config.load().onboarding_complete
+
+
+def test_completing_the_tour_turns_gestures_on(fakes, monkeypatch):
+    first_run()
+    clock = iter(i / 30 for i in range(100_000))
+    monkeypatch.setattr(app.time, "time", lambda: next(clock))
+
+    def pose(fingers, rot, n):
+        return [make_hand(fingers, rot)] * n
+
+    rest = [None] * 40          # lower the hand between steps
+    script = (
+        pose({"thumb", "index", "middle", "ring", "pinky"}, 0, 40) + rest
+        + pose({"index"}, 0, 50) + rest              # point up
+        + pose({"index"}, 180, 50) + rest            # point down
+        + pose({"index"}, 90, 15) + rest             # point left
+        + pose({"index"}, -90, 15) + rest            # point right
+        + pose({"pinky"}, 0, 45) + rest              # hide menu
+        + pose({"pinky"}, 0, 45) + rest              # show menu
+        + pose({"index", "pinky"}, 0, 45) + rest     # pause
+        + pose({"index", "pinky"}, 0, 45) + rest     # resume
+    )
+    tour_frames = len(script)
+    script += pose({"index"}, -90, 15)               # a real gesture afterwards
+    FakeTracker.script = script
+    app.main(["--max-frames", str(len(script) + 5)])
+
+    assert Config.load().onboarding_complete
+    assert Config.load().menu_visible  # ended up shown again
+    assert fakes.calls == [("next_tab",)], f"tour took {tour_frames} frames"
+
+
+def test_tour_can_be_replayed_and_ended(fakes):
+    FakeTracker.hand = make_hand({"index"})
+    fakes.keys.extend([ord("o")] + [-1] * 10 + [ord("o")])
+    app.main(["--max-frames", "40"])
+    scrolls = [c for c in fakes.calls if c[0] == "scroll"]
+    # live at frame 1, practice for ~11 frames, then live again
+    assert 0 < len(scrolls) < 38
+
+
+def test_first_run_tour_cannot_be_ended_with_o(fakes):
+    first_run()
+    FakeTracker.hand = make_hand({"index"})
+    fakes.keys.extend([ord("o")])
+    app.main(["--max-frames", "30"])
+    assert fakes.calls == []
