@@ -11,13 +11,14 @@ file (hand_landmarker.task). It is looked for next to the app first, and
 downloaded once to ~/.mosign/models if it is missing.
 """
 
-import os
 import sys
 import time
 import urllib.request
 from pathlib import Path
 
 import numpy as np
+
+from mosign.config import app_home
 
 MODEL_NAME = "hand_landmarker.task"
 MODEL_URL = (
@@ -38,11 +39,6 @@ HAND_CONNECTIONS = [
 
 class ModelNotFoundError(RuntimeError):
     pass
-
-
-def app_home():
-    """Folder for settings and downloaded models (override with MOSIGN_HOME)."""
-    return Path(os.environ.get("MOSIGN_HOME", Path.home() / ".mosign"))
 
 
 def model_candidates():

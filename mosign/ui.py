@@ -1,0 +1,330 @@
+"""The Mosign window: layout, camera view, status card and buttons.
+
+Everything is drawn into one numpy image per frame and shown with
+cv2.imshow, so the app has no extra GUI toolkit to install or package.
+"""
+
+from dataclasses import dataclass, field
+
+import cv2
+import numpy as np
+
+from mosign import theme
+from mosign.draw import (
+    Rect,
+    TextLayer,
+    blend_rect,
+    card,
+    ipt,
+    paste,
+    progress_bar,
+    ring,
+    rounded_mask,
+    rounded_rect,
+    soft_shadow,
+)
+from mosign.gestures import NEXT_TAB, PREV_TAB, SCROLL_DOWN, SCROLL_UP, TOGGLE_TRACKING
+from mosign.tracker import HAND_CONNECTIONS
+
+WIDTH, HEIGHT = 1280, 760
+WINDOW_TITLE = "Mosign"
+
+HEADER = Rect(0, 0, WIDTH, 76)
+LEFT = Rect(24, 92, 240, 572)       # penguin
+CAMERA = Rect(288, 92, 664, 374)    # 16:9 camera view
+STATUS = Rect(288, 482, 664, 182)   # "right now" card
+RIGHT = Rect(976, 92, 280, 572)     # reference menu
+BAR = Rect(24, 680, WIDTH - 48, 56)
+
+CAMERA_LETTERBOX = theme.bgr("#2C4A36")
+
+GESTURE_NAMES = {
+    SCROLL_UP: "Pointing up",
+    SCROLL_DOWN: "Pointing down",
+    PREV_TAB: "Pointing left",
+    NEXT_TAB: "Pointing right",
+    TOGGLE_TRACKING: "Rock horns",
+}
+
+EVENT_TEXT = {
+    "scroll_up": "Scrolling up",
+    "scroll_down": "Scrolling down",
+    "prev_tab": "Previous tab",
+    "next_tab": "Next tab",
+    "sleep": "Tracking paused",
+    "wake": "Tracking on",
+}
+
+
+@dataclass
+class View:
+    """Everything the window needs to draw one frame."""
+
+    frame: object = None            # mirrored BGR camera frame, or None
+    hand: object = None             # 21 normalized (x, y) points, or None
+    confirmed: str = None           # steady gesture label
+    awake: bool = True
+    holding: object = None          # (label, progress) while holding a special gesture
+    scroll_mode: str = None
+    events: list = field(default_factory=list)
+    camera_label: str = "Camera 0"
+    fps: float = 0.0
+
+
+@dataclass
+class Button:
+    command: str
+    label: str
+    key: str
+    rect: Rect = None
+
+
+class UI:
+    def __init__(self):
+        self.mouse = (-1, -1)
+        self._commands = []
+        self._toast = None   # (text, until)
+        self._flash = None   # (text, until)
+        self.buttons = []
+        self._camera_mask = rounded_mask(CAMERA.w, CAMERA.h, 18)
+        self._static = self._build_static()
+
+    # ---------- input ----------
+    def on_mouse(self, event, x, y, flags=0, param=None):
+        self.mouse = (x, y)
+        if event == cv2.EVENT_LBUTTONUP:
+            self.click(x, y)
+
+    def click(self, x, y):
+        for b in self.buttons:
+            if b.rect and b.rect.contains(x, y):
+                self._commands.append(b.command)
+                return b.command
+        return None
+
+    def pop_commands(self):
+        cmds, self._commands = self._commands, []
+        return cmds
+
+    def toast(self, text, now, seconds=2.5):
+        self._toast = (text, now + seconds)
+
+    # ---------- drawing ----------
+    def _build_static(self):
+        img = np.full((HEIGHT, WIDTH, 3), theme.BG, np.uint8)
+        for rect in self._static_cards():
+            soft_shadow(img, rect)
+        for rect in self._static_cards():
+            card(img, rect)
+        return img
+
+    def _static_cards(self):
+        return [CAMERA, STATUS]
+
+    def _layout_buttons(self, view):
+        buttons = [
+            Button("swap_camera", "Swap camera", "C"),
+            Button("toggle_tracking", "Pause tracking" if view.awake else "Resume tracking", "S"),
+            Button("quit", "Quit", "Q"),
+        ]
+        x = BAR.x
+        for b in buttons:
+            w = TextLayer.measure(b.label, 16, True)[0] + 76
+            b.rect = Rect(x, BAR.y + 6, w, 44)
+            x += w + 12
+        return buttons
+
+    def render(self, view, now):
+        img = self._static.copy()
+        text = TextLayer()
+
+        for event in view.events:
+            if event in EVENT_TEXT:
+                self._flash = (EVENT_TEXT[event], now + 0.9)
+        if self._flash and now > self._flash[1]:
+            self._flash = None
+        if self._toast and now > self._toast[1]:
+            self._toast = None
+
+        self._draw_header(img, text, view)
+        self._draw_camera(img, text, view)
+        self._draw_status(img, text, view)
+        self.buttons = self._layout_buttons(view)
+        self._draw_buttons(img, text)
+        self._draw_extras(img, text, view, now)
+        if self._toast:
+            self._draw_toast(img, text, self._toast[0])
+        text.flush(img)
+        return img
+
+    def _draw_extras(self, img, text, view, now):
+        """Hook for panels added on top of the base window."""
+
+    def _pill(self, img, text, x, cy, label, fill, border, color, size=15, dot=None, align="l"):
+        tw, _ = TextLayer.measure(label, size, True)
+        pad = 14
+        dot_w = 16 if dot is not None else 0
+        w = tw + pad * 2 + dot_w
+        h = size + 16
+        if align == "r":
+            x -= w
+        elif align == "m":
+            x -= w // 2
+        rect = Rect(int(x), int(cy - h // 2), int(w), int(h))
+        rounded_rect(img, rect, h // 2, fill)
+        if border is not None:
+            rounded_rect(img, rect, h // 2, border, 1)
+        if dot is not None:
+            cv2.circle(img, (rect.x + pad + 4, rect.cy), 5, dot, -1, cv2.LINE_AA)
+        text.add(label, (rect.x + pad + dot_w, rect.cy), size, color, True, "lm")
+        return rect
+
+    def _draw_header(self, img, text, view):
+        logo = Rect(28, 18, 40, 40)
+        rounded_rect(img, logo, 12, theme.GREEN)
+        cv2.circle(img, (logo.right - 9, logo.y + 9), 6, theme.YELLOW, -1, cv2.LINE_AA)
+        text.add("m", (logo.cx - 1, logo.cy + 1), 26, theme.WHITE, True, "mm")
+        text.add("Mosign", (80, 38), 28, theme.TEXT, True, "lm")
+        tw = TextLayer.measure("Mosign", 28, True)[0]
+        text.add("hand gesture control", (80 + tw + 12, 40), 15, theme.MUTED, False, "lm")
+
+        if view.awake:
+            r = self._pill(img, text, WIDTH - 24, 38, "Tracking on", theme.GREEN_SOFT,
+                           theme.GREEN, theme.GREEN_DARK, dot=theme.GREEN, align="r")
+        else:
+            r = self._pill(img, text, WIDTH - 24, 38, "Paused", theme.YELLOW_SOFT,
+                           theme.YELLOW, theme.YELLOW_DARK, dot=theme.YELLOW, align="r")
+        self._pill(img, text, r.x - 10, 38, view.camera_label, theme.PANEL,
+                   theme.BORDER, theme.MUTED, align="r")
+
+    def camera_fit(self, frame):
+        fh, fw = frame.shape[:2]
+        scale = min(CAMERA.w / fw, CAMERA.h / fh)
+        nw, nh = max(1, int(fw * scale)), max(1, int(fh * scale))
+        if CAMERA.w - nw <= 2:   # avoid 1px slivers from rounding
+            nw = CAMERA.w
+        if CAMERA.h - nh <= 2:
+            nh = CAMERA.h
+        return (CAMERA.w - nw) // 2, (CAMERA.h - nh) // 2, nw, nh
+
+    def _draw_camera(self, img, text, view):
+        if view.frame is None:
+            block = np.full((CAMERA.h, CAMERA.w, 3), CAMERA_LETTERBOX, np.uint8)
+            paste(img, block, CAMERA.x, CAMERA.y, self._camera_mask)
+            text.add("No camera picture", (CAMERA.cx, CAMERA.cy - 16), 24, theme.WHITE, True, "mm")
+            text.add("Press C or click Swap camera to try another one",
+                     (CAMERA.cx, CAMERA.cy + 18), 16, theme.GREEN_SOFT, False, "mm")
+            return
+
+        ox, oy, nw, nh = self.camera_fit(view.frame)
+        block = np.full((CAMERA.h, CAMERA.w, 3), CAMERA_LETTERBOX, np.uint8)
+        interp = cv2.INTER_AREA if nw < view.frame.shape[1] else cv2.INTER_LINEAR
+        block[oy:oy + nh, ox:ox + nw] = cv2.resize(view.frame, (nw, nh), interpolation=interp)
+        paste(img, block, CAMERA.x, CAMERA.y, self._camera_mask)
+
+        if not view.awake:
+            blend_rect(img, CAMERA, theme.BG, 0.55)
+
+        if view.hand is not None:
+            pts = [(CAMERA.x + ox + x * nw, CAMERA.y + oy + y * nh) for x, y in view.hand]
+            self._draw_hand(img, pts, dim=not view.awake)
+            if view.holding:
+                palm = [pts[i] for i in (0, 5, 9, 13, 17)]
+                cx = sum(p[0] for p in palm) / 5
+                cy = sum(p[1] for p in palm) / 5
+                size = np.hypot(pts[0][0] - pts[9][0], pts[0][1] - pts[9][1])
+                ring(img, (cx, cy), max(40, min(110, size * 1.1)), view.holding[1])
+
+        if not view.awake:
+            banner = Rect(CAMERA.cx - 210, CAMERA.y + 18, 420, 68)
+            card(img, banner, 16, theme.PANEL, theme.YELLOW)
+            text.add("Tracking paused", (banner.cx, banner.y + 24), 20, theme.TEXT, True, "mm")
+            text.add("Hold rock horns for 1 second to wake up",
+                     (banner.cx, banner.y + 48), 15, theme.MUTED, False, "mm")
+
+    def _draw_hand(self, img, pts, dim=False):
+        line = theme.GREEN_SOFT if dim else theme.YELLOW
+        for a, b in HAND_CONNECTIONS:
+            cv2.line(img, ipt(pts[a]), ipt(pts[b]), theme.GREEN_DARK, 6, cv2.LINE_AA)
+            cv2.line(img, ipt(pts[a]), ipt(pts[b]), line, 3, cv2.LINE_AA)
+        for p in pts:
+            cv2.circle(img, ipt(p), 6, theme.GREEN_DARK, -1, cv2.LINE_AA)
+            cv2.circle(img, ipt(p), 4, theme.WHITE, -1, cv2.LINE_AA)
+
+    def _draw_status(self, img, text, view):
+        x, y = STATUS.x + 28, STATUS.y
+        text.add("RIGHT NOW", (x, y + 26), 13, theme.MUTED, True, "lm")
+        if view.confirmed in GESTURE_NAMES:
+            title = GESTURE_NAMES[view.confirmed]
+        elif view.hand is not None:
+            title = "Hand found"
+        else:
+            title = "No hand in view"
+        text.add(title, (x, y + 64), 30, theme.TEXT, True, "lm")
+
+        if self._flash:
+            self._pill(img, text, x, y + 108, self._flash[0], theme.YELLOW, None, theme.TEXT, 16)
+        elif not view.awake:
+            self._pill(img, text, x, y + 108, "Paused", theme.YELLOW_SOFT, theme.YELLOW,
+                       theme.YELLOW_DARK, 16)
+        elif view.scroll_mode:
+            self._pill(img, text, x, y + 108, f"Scrolling {view.scroll_mode}", theme.GREEN,
+                       None, theme.WHITE, 16)
+        else:
+            self._pill(img, text, x, y + 108, "Ready", theme.GREEN_SOFT, None,
+                       theme.GREEN_DARK, 16)
+
+        if view.holding:
+            msg = "Keep holding to pause tracking" if view.awake else "Keep holding to wake up"
+            text.add(msg, (x, y + 146), 15, theme.MUTED, False, "lm")
+            progress_bar(img, Rect(x, y + 160, STATUS.w - 56, 10), view.holding[1])
+        else:
+            tip = ("Point up or down to scroll, left or right to switch tabs."
+                   if view.awake else "Gestures are ignored until you wake tracking.")
+            text.add(tip, (x, y + 152), 15, theme.MUTED, False, "lm")
+        if view.fps:
+            text.add(f"{view.fps:.0f} fps", (STATUS.right - 24, y + 26), 13, theme.MUTED,
+                     False, "rm")
+
+    def _draw_buttons(self, img, text):
+        mx, my = self.mouse
+        for b in self.buttons:
+            hover = b.rect.contains(mx, my)
+            fill = theme.YELLOW_SOFT if hover else theme.PANEL
+            border = theme.YELLOW if hover else theme.BORDER
+            rounded_rect(img, b.rect, 22, fill)
+            rounded_rect(img, b.rect, 22, border, 1)
+            text.add(b.label, (b.rect.x + 20, b.rect.cy), 16, theme.TEXT, True, "lm")
+            badge = Rect(b.rect.right - 42, b.rect.cy - 12, 24, 24)
+            rounded_rect(img, badge, 7, theme.GREEN_SOFT)
+            text.add(b.key, (badge.cx, badge.cy), 13, theme.GREEN_DARK, True, "mm")
+        text.add("Click your browser so it is the active window, then gesture.",
+                 (BAR.right, BAR.cy + 2), 14, theme.MUTED, False, "rm")
+
+    def _draw_toast(self, img, text, label):
+        self._pill(img, text, CAMERA.cx, CAMERA.y + 30, label, theme.GREEN_DARK, None,
+                   theme.WHITE, 15, align="m")
+
+
+def render_message(title, body):
+    """A plain full-window message, e.g. when the hand model can't be loaded."""
+    img = np.full((HEIGHT, WIDTH, 3), theme.BG, np.uint8)
+    box = Rect(WIDTH // 2 - 360, HEIGHT // 2 - 130, 720, 260)
+    soft_shadow(img, box)
+    card(img, box)
+    text = TextLayer()
+    text.add(title, (box.cx, box.y + 60), 26, theme.TEXT, True, "mm")
+    words, lines, line = body.split(), [], ""
+    for word in words:
+        trial = f"{line} {word}".strip()
+        if TextLayer.measure(trial, 16)[0] > box.w - 80:
+            lines.append(line)
+            line = word
+        else:
+            line = trial
+    lines.append(line)
+    for i, ln in enumerate(lines[:6]):
+        text.add(ln, (box.cx, box.y + 110 + i * 24), 16, theme.MUTED, False, "mm")
+    text.add("Press Q to quit", (box.cx, box.bottom - 30), 14, theme.GREEN_DARK, True, "mm")
+    text.flush(img)
+    return img

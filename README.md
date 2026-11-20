@@ -26,7 +26,19 @@ Point your index finger the way you want to go (other fingers curled, thumb eith
 
 The camera view is mirrored, so "left" means your left.
 
-While tracking is off, only the rock-horns gesture is watched for, so you can rest your hands or talk with them freely. You can also press `s` in the app window.
+While tracking is off, only the rock-horns gesture is watched for, so you can rest your hands or talk with them freely.
+
+## The app window
+
+Mosign opens a light-green window that shows your camera with your hand's skeleton drawn on top, plus a "Right now" card that says which gesture it sees and what it's doing.
+
+| Key / button | Action |
+|---|---|
+| `C` / **Swap camera** | Switch to the next working camera (remembered next time) |
+| `S` / **Pause tracking** | Pause or resume tracking |
+| `Q` / **Quit** | Quit |
+
+Settings are saved in `~/.mosign/config.json` (camera, scroll speed, hold time, etc.).
 
 ## Requirements
 
@@ -41,7 +53,7 @@ cd path/to/project-folder
 python3.12 -m venv gestures
 source gestures/bin/activate
 python -m pip install --upgrade pip
-python -m pip install opencv-python mediapipe pyautogui
+python -m pip install -r requirements.txt
 ```
 
 Check that the environment uses the right version:
