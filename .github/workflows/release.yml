@@ -1,0 +1,98 @@
+# Builds Mosign for Windows, Intel Macs and Apple Silicon Macs, and attaches
+# the installers to a GitHub Release.
+#
+# To make a release:   git tag v0.1.0 && git push origin v0.1.0
+# (or run it by hand from the Actions tab to just get the builds as artifacts)
+
+name: Build & release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create the release
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            os: macos-15
+            script: ./scripts/build_mac.sh
+            files: dist/*.dmg
+          - name: macOS (Intel)
+            os: macos-15-intel
+            script: ./scripts/build_mac.sh
+            files: dist/*.dmg
+          - name: Windows
+            os: windows-latest
+            script: pwsh -File scripts/build_windows.ps1
+            files: dist/*.zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          app=$(python -c "import mosign; print(mosign.__version__)")
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$app" != "$tag" ]; then
+            echo "::error::Tag v$tag doesn't match mosign/__init__.py version $app"
+            exit 1
+          fi
+
+      - name: Build (runs tests, builds, self-tests the app)
+        shell: bash
+        env:
+          PYTHON: python
+        run: ${{ matrix.script }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mosign-${{ matrix.os }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          body: |
+            ## Download
+
+            | Your computer | File |
+            |---|---|
+            | Mac with Apple Silicon (M1 or newer) | `Mosign-*-arm64.dmg` |
+            | Mac with an Intel chip | `Mosign-*-x86_64.dmg` |
+            | Windows 10/11 | `Mosign-*-windows-x64.zip` |
+
+            Not sure which Mac you have? Apple menu → **About This Mac**: "Chip: Apple M…" means Apple Silicon, "Processor: Intel" means Intel.
+
+            ### Mac
+            1. Open the `.dmg` and drag **Mosign** into **Applications**.
+            2. The first time, **right-click Mosign → Open → Open** (it isn't signed by Apple). If there's no Open button, go to **System Settings → Privacy & Security → Open Anyway**.
+            3. Allow the camera, then turn Mosign on in **System Settings → Privacy & Security → Accessibility** and reopen it. Without this, gestures don't scroll anything.
+
+            ### Windows
+            Unzip, open the `Mosign` folder and double-click **Mosign.exe**. If Windows says it protected your PC, click **More info → Run anyway**.

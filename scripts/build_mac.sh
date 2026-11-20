@@ -61,7 +61,13 @@ STAGE="build/dmg"
 rm -rf "$STAGE" && mkdir -p "$STAGE"
 cp -R dist/Mosign.app "$STAGE/"
 ln -s /Applications "$STAGE/Applications"   # drag-to-install shortcut
-hdiutil create -volname "Mosign" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+for attempt in 1 2 3; do
+  if hdiutil create -volname "Mosign" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null; then
+    break
+  fi
+  [ "$attempt" = 3 ] && { echo "hdiutil failed"; exit 1; }
+  echo "hdiutil busy, retrying..."; sleep 5
+done
 
 echo
 echo "Done!"
