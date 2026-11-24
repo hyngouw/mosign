@@ -1,6 +1,6 @@
 # Packaging Mosign as a double-clickable app
 
-You can turn Mosign into a normal app that other people install like any other, with no Terminal, Python or `pip install`. The build bundles Python, OpenCV, MediaPipe, the hand model and Mosign itself into one app.
+You can turn Mosign into a normal app that other people install like any other, with no Terminal, Python or `pip install`. The build bundles Python, OpenCV, MediaPipe, Qt (for the windows and the on-screen overlay), the hand model and Mosign itself into one app.
 
 - **macOS:** `Mosign.app`, shipped inside a `Mosign.dmg` installer
 - **Windows:** a `Mosign` folder with `Mosign.exe`, shipped as a `.zip`
@@ -72,5 +72,6 @@ Windows has a similar warning ("Windows protected your PC" → **More info → R
   `./dist/Mosign.app/Contents/MacOS/Mosign --self-test`
 - **Gestures show in the app but nothing happens in the browser:** Accessibility permission (step 4 above). If you rebuilt the app, remove the old Mosign entry from the Accessibility list and add the new one, because macOS ties the permission to that exact build.
 - **Wrong camera:** press `C` (or **Swap camera**) in the app. The choice is remembered.
-- **App size:** expect roughly 200–500 MB, mostly MediaPipe and OpenCV.
+- **App size:** expect roughly 250–550 MB, mostly MediaPipe, OpenCV and Qt.
+- **Overlay not showing over a full-screen browser (macOS):** the overlay is set to appear on every desktop and next to full-screen apps, but macOS can still hide it over some full-screen windows. Use the browser in a normal (maximised) window instead.
 - **Settings and reset:** settings live in `~/.mosign/config.json`. Delete that file to start fresh, including the first-run tour.

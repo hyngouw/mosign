@@ -42,7 +42,8 @@ STEPS = [
          "Point your index finger to your right.",
          NEXT_TAB, target=("next_tab",)),
     Step("menu", "Hold your pinky up",
-         "Hold up only your pinky for 1 second to {menu_action} the gesture menu.",
+         "Hold up only your pinky for 1 second to {menu_action} the gesture menu "
+         "in the top-right corner of your screen.",
          TOGGLE_MENU, target=("menu_on", "menu_off")),
     Step("menu_again", "Again, to {menu_action} it",
          "Hold your pinky up once more to {menu_action} the menu.",

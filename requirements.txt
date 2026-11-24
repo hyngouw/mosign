@@ -14,3 +14,4 @@ numpy; sys_platform != "darwin" or platform_machine != "x86_64"
 opencv-python
 pyautogui
 Pillow>=10.1
+PySide6-Essentials   # windows + the on-screen overlay

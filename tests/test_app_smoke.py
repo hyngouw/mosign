@@ -1,14 +1,12 @@
-"""Run the real main loop with a fake camera, fake tracker and fake OS actions."""
-
-import os
+"""Drive the real Engine with a fake camera, fake hands and fake OS actions."""
 
 import numpy as np
 import pytest
 
 from handgen import make_hand
-from mosign import app
 from mosign.actions import RecordingActions
 from mosign.config import Config
+from mosign.engine import Engine
 
 
 class FakeCapture:
@@ -32,143 +30,134 @@ class FakeCapture:
 
 
 class FakeTracker:
-    """Pretends the user holds the same hand pose every frame."""
+    """Pretends the user holds the same hand pose every frame (or follows a script)."""
 
-    hand = None
-
-    def __init__(self, *a, **k):
+    def __init__(self, hand=None, script=None):
+        self.hand = hand
+        self.script = script
         self.backend = "fake"
-
-    script = None  # optional list of hands, one per frame
+        self.closed = False
 
     def process(self, frame):
-        if FakeTracker.script is not None:
-            FakeTracker.hand = FakeTracker.script.pop(0) if FakeTracker.script else None
-        if FakeTracker.hand is None:
+        if self.script is not None:
+            self.hand = self.script.pop(0) if self.script else None
+        if self.hand is None:
             return None
         h, w = frame.shape[:2]
         aspect = w / h
-        return [(x / aspect, y) for x, y in FakeTracker.hand]
+        return [(x / aspect, y) for x, y in self.hand]
 
     def close(self):
-        pass
+        self.closed = True
 
 
 @pytest.fixture
-def fakes(monkeypatch):
-    Config(onboarding_complete=True).save()  # most tests skip the tour
-    recorder = RecordingActions()
+def make(monkeypatch):
+    """make(hand=..., script=..., tour=..., first_run=...) -> (engine, recorder)."""
     FakeCapture.opened = []
-    FakeTracker.hand = None
-    FakeTracker.script = None
+    FakeCapture.working = {0, 1}
     monkeypatch.setattr("mosign.camera.cv2.VideoCapture", FakeCapture)
-    monkeypatch.setattr(app, "HandTracker", FakeTracker)
-    monkeypatch.setattr(app, "PyAutoGuiActions", lambda: recorder)
-    keys = []
-    # no real window in CI; run with xvfb-run to exercise the real one
-    if not os.environ.get("DISPLAY"):
-        for name, fn in {
-            "imshow": lambda *a: None,
-            "namedWindow": lambda *a: None,
-            "resizeWindow": lambda *a: None,
-            "setMouseCallback": lambda *a: None,
-            "getWindowProperty": lambda *a: 1.0,
-            "destroyAllWindows": lambda *a: None,
-        }.items():
-            monkeypatch.setattr(app.cv2, name, fn)
-    real_wait = app.cv2.waitKey
 
-    def wait_key(delay):
-        if os.environ.get("DISPLAY"):
-            real_wait(delay)
-        return keys.pop(0) if keys else -1
+    def _make(hand=None, script=None, tour=False, first_run=False):
+        Config(onboarding_complete=not first_run).save()
+        recorder = RecordingActions()
+        engine = Engine(Config.load(), start_tour=tour,
+                        tracker=FakeTracker(hand, script), actions=recorder)
+        return engine, recorder
 
-    monkeypatch.setattr(app.cv2, "waitKey", wait_key)
-    recorder.keys = keys
-    return recorder
+    return _make
 
 
-def test_main_loop_runs_and_scrolls(fakes):
-    FakeTracker.hand = make_hand({"index"})  # index pointing up = scroll up
-    assert app.main(["--max-frames", "30"]) == 0
-    assert any(c[0] == "scroll" and c[1] > 0 for c in fakes.calls)
+def run(engine, frames, keys=None, t0=0.0, dt=1 / 30):
+    """Step the engine; keys maps frame number -> list of commands."""
+    out = None
+    for i in range(frames):
+        out = engine.step(t0 + i * dt, (keys or {}).get(i, []))
+        if out.quit:
+            break
+    return out
 
 
-def test_point_right_switches_tab(fakes):
-    FakeTracker.hand = make_hand({"index"}, rotation=-90)
-    app.main(["--max-frames", "30"])
-    assert fakes.calls.count(("next_tab",)) == 1
+def test_scrolls_when_pointing_up(make):
+    engine, rec = make(make_hand({"index"}))
+    run(engine, 30)
+    assert any(c[0] == "scroll" and c[1] > 0 for c in rec.calls)
 
 
-def test_s_key_pauses_tracking(fakes):
-    FakeTracker.hand = make_hand({"index"})
-    fakes.keys.extend([ord("s")])
-    app.main(["--max-frames", "30"])
-    assert len(fakes.calls) <= 1  # paused on the first frame
+def test_point_right_switches_tab(make):
+    engine, rec = make(make_hand({"index"}, rotation=-90))
+    run(engine, 30)
+    assert rec.calls.count(("next_tab",)) == 1
 
 
-def test_c_key_swaps_camera_and_remembers_it(fakes):
-    fakes.keys.extend([-1, ord("c")])
-    app.main(["--max-frames", "10", "--camera", "0"])
+def test_outputs_main_image_and_transparent_overlay(make):
+    engine, _ = make(make_hand({"index"}))
+    out = run(engine, 3)
+    assert out.main.ndim == 3 and out.main.shape[2] == 3
+    assert out.overlay.shape[2] == 4
+    alpha = out.overlay[..., 3]
+    assert alpha.min() == 0 and alpha.max() == 255   # see-through and solid parts
+    assert np.all(out.overlay[..., :3] <= alpha[..., None])   # valid premultiplied
+
+
+def test_s_pauses_tracking(make):
+    engine, rec = make(make_hand({"index"}))
+    run(engine, 30, {0: ["toggle_tracking"]})
+    assert rec.calls == []
+    assert engine.overlay.penguin.asleep
+
+
+def test_c_swaps_camera_and_remembers_it(make):
+    engine, _ = make()
+    run(engine, 5, {1: ["swap_camera"]})
     assert 1 in FakeCapture.opened
     assert Config.load().camera_index == 1
 
 
-def test_q_key_quits(fakes):
-    fakes.keys.extend([ord("q")])
-    assert app.main(["--max-frames", "1000"]) == 0
+def test_quit_command(make):
+    engine, _ = make()
+    out = run(engine, 100, {3: ["quit"]})
+    assert out.quit
 
 
-def test_missing_camera_does_not_crash(fakes):
+def test_missing_camera_does_not_crash(make):
     FakeCapture.working = set()
-    try:
-        assert app.main(["--max-frames", "5"]) == 0
-    finally:
-        FakeCapture.working = {0, 1}
+    engine, _ = make()
+    out = run(engine, 5)
+    assert out.main is not None
 
 
-def test_tracker_failure_shows_message_instead_of_crashing(fakes, monkeypatch):
-    def broken(*a, **k):
-        raise RuntimeError("no model")
-
-    monkeypatch.setattr(app, "HandTracker", broken)
-    assert app.main(["--max-frames", "3"]) == 1
-
-
-def test_m_key_toggles_menu_and_remembers_it(fakes):
-    fakes.keys.extend([ord("m")])
-    app.main(["--max-frames", "5"])
+def test_m_hides_overlay_menu_and_remembers_it(make):
+    engine, _ = make()
+    shown = run(engine, 2).overlay
+    hidden = run(engine, 2, {0: ["toggle_menu"]}, t0=1).overlay
+    assert hidden.shape[0] < shown.shape[0]     # overlay shrinks to just Pip
     assert Config.load().menu_visible is False
-    fakes.keys.extend([ord("m")])
-    app.main(["--max-frames", "5"])
+    assert engine.overlay.penguin.waving        # Pip reacts to the key too
+    run(engine, 2, {0: ["toggle_menu"]}, t0=2)
     assert Config.load().menu_visible is True
 
 
-def first_run():
-    Config(onboarding_complete=False).save()
+def test_pinky_hold_hides_overlay_menu(make):
+    engine, _ = make(make_hand({"pinky"}))
+    out = run(engine, 50)
+    assert not out.menu_visible
 
 
-def test_first_run_is_practice_mode(fakes):
-    first_run()
-    FakeTracker.hand = make_hand({"index"})
-    app.main(["--max-frames", "60"])
-    assert fakes.calls == []           # nothing reached the browser
+def test_close_releases_tracker(make):
+    engine, _ = make()
+    engine.close()
+    assert engine.tracker.closed
+
+
+def test_first_run_is_practice_mode(make):
+    engine, rec = make(make_hand({"index"}), first_run=True)
+    run(engine, 60)
+    assert rec.calls == []           # nothing reached the browser
     assert not Config.load().onboarding_complete
 
 
-def test_skip_tour_flag(fakes):
-    first_run()
-    FakeTracker.hand = make_hand({"index"})
-    app.main(["--max-frames", "30", "--skip-tour"])
-    assert any(c[0] == "scroll" for c in fakes.calls)
-    assert Config.load().onboarding_complete
-
-
-def test_completing_the_tour_turns_gestures_on(fakes, monkeypatch):
-    first_run()
-    clock = iter(i / 30 for i in range(100_000))
-    monkeypatch.setattr(app.time, "time", lambda: next(clock))
-
+def test_completing_the_tour_turns_gestures_on(make):
     def pose(fingers, rot, n):
         return [make_hand(fingers, rot)] * n
 
@@ -186,26 +175,30 @@ def test_completing_the_tour_turns_gestures_on(fakes, monkeypatch):
     )
     tour_frames = len(script)
     script += pose({"index"}, -90, 15)               # a real gesture afterwards
-    FakeTracker.script = script
-    app.main(["--max-frames", str(len(script) + 5)])
+    engine, rec = make(script=script, first_run=True)
+    run(engine, len(script) + 5)
 
     assert Config.load().onboarding_complete
     assert Config.load().menu_visible  # ended up shown again
-    assert fakes.calls == [("next_tab",)], f"tour took {tour_frames} frames"
+    assert rec.calls == [("next_tab",)], f"tour took {tour_frames} frames"
 
 
-def test_tour_can_be_replayed_and_ended(fakes):
-    FakeTracker.hand = make_hand({"index"})
-    fakes.keys.extend([ord("o")] + [-1] * 10 + [ord("o")])
-    app.main(["--max-frames", "40"])
-    scrolls = [c for c in fakes.calls if c[0] == "scroll"]
-    # live at frame 1, practice for ~11 frames, then live again
+def test_tour_can_be_replayed_and_ended(make):
+    engine, rec = make(make_hand({"index"}))
+    run(engine, 40, {0: ["tour"], 11: ["tour"]})
+    scrolls = [c for c in rec.calls if c[0] == "scroll"]
+    # practice for ~11 frames, then live again
     assert 0 < len(scrolls) < 38
 
 
-def test_first_run_tour_cannot_be_ended_with_o(fakes):
-    first_run()
-    FakeTracker.hand = make_hand({"index"})
-    fakes.keys.extend([ord("o")])
-    app.main(["--max-frames", "30"])
-    assert fakes.calls == []
+def test_first_run_tour_cannot_be_ended(make):
+    engine, rec = make(make_hand({"index"}), first_run=True)
+    run(engine, 30, {0: ["tour"]})
+    assert rec.calls == []
+
+
+def test_tour_forces_overlay_menu_on(make):
+    engine, _ = make()
+    engine.controller.toggle_menu()
+    out = run(engine, 2, {0: ["tour"]})
+    assert out.menu_visible

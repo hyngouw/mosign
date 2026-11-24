@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -14,3 +15,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("MOSIGN_HOME", str(tmp_path / "mosign_home"))
     yield tmp_path / "mosign_home"
 
+
+
+# Qt windows open off-screen in tests (works on macOS, Windows and Linux CI)
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

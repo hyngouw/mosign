@@ -38,8 +38,9 @@ a = Analysis(
     pathex=[str(ROOT)],
     binaries=mp_binaries,
     datas=datas,
-    hiddenimports=mp_hidden + ["pyautogui", "PIL.ImageFont"],
-    excludes=["pytest", "IPython"],
+    hiddenimports=mp_hidden + ["pyautogui", "PIL.ImageFont", "PySide6.QtWidgets"]
+    + (["objc", "AppKit", "Foundation"] if sys.platform == "darwin" else []),
+    excludes=["pytest", "IPython", "tkinter"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

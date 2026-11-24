@@ -1,7 +1,7 @@
-"""The Mosign window: layout, camera view, status card and buttons.
+"""The Mosign window: camera view, status / tour card and buttons.
 
-Everything is drawn into one numpy image per frame and shown with
-cv2.imshow, so the app has no extra GUI toolkit to install or package.
+Everything is drawn into one numpy image per frame; qt_app.py shows it.
+Pip and the gesture menu live in the on-screen overlay (overlay.py).
 """
 
 from dataclasses import dataclass, field
@@ -34,18 +34,15 @@ from mosign.gestures import (
     TOGGLE_TRACKING,
 )
 from mosign.icons import draw_gesture_icon, draw_hand_icon
-from mosign.penguin import Penguin
 from mosign.tracker import HAND_CONNECTIONS
 
-WIDTH, HEIGHT = 1280, 760
+WIDTH, HEIGHT = 768, 780
 WINDOW_TITLE = "Mosign"
 
 HEADER = Rect(0, 0, WIDTH, 76)
-LEFT = Rect(24, 92, 240, 572)       # penguin
-CAMERA = Rect(288, 92, 664, 374)    # 16:9 camera view
-STATUS = Rect(288, 482, 664, 182)   # "right now" card
-RIGHT = Rect(976, 92, 280, 572)     # reference menu
-BAR = Rect(24, 680, WIDTH - 48, 56)
+CAMERA = Rect(24, 88, 720, 405)     # 16:9 camera view
+STATUS = Rect(24, 509, 720, 182)    # "right now" / tour card
+BAR = Rect(24, 707, 720, 56)
 
 CAMERA_LETTERBOX = theme.bgr("#2C4A36")
 
@@ -57,16 +54,6 @@ GESTURE_NAMES = {
     TOGGLE_TRACKING: "Rock horns",
     TOGGLE_MENU: "Pinky up",
 }
-
-# Reference menu rows: (gesture label, title, what it does)
-MENU_ROWS = [
-    (SCROLL_UP, "Point up", "Scroll up"),
-    (SCROLL_DOWN, "Point down", "Scroll down"),
-    (PREV_TAB, "Point left", "Previous tab"),
-    (NEXT_TAB, "Point right", "Next tab"),
-    (TOGGLE_TRACKING, "Hold rock horns", "Pause / resume tracking"),
-    (TOGGLE_MENU, "Hold pinky up", "Hide / show this menu"),
-]
 
 EVENT_TEXT = {
     "scroll_up": "Scrolling up",
@@ -115,13 +102,10 @@ class UI:
         self.buttons = []
         self._camera_mask = rounded_mask(CAMERA.w, CAMERA.h, 18)
         self._statics = {}
-        self.penguin = Penguin()
 
     # ---------- input ----------
-    def on_mouse(self, event, x, y, flags=0, param=None):
+    def hover(self, x, y):
         self.mouse = (x, y)
-        if event == cv2.EVENT_LBUTTONUP:
-            self.click(x, y)
 
     def click(self, x, y):
         for b in self.buttons:
@@ -152,31 +136,28 @@ class UI:
         return self._statics[key]
 
     def _static_key(self, view):
-        return (view.menu_visible,)
+        return ()
 
     def _static_cards(self, view):
-        cards = [LEFT, CAMERA, STATUS]
-        if view.menu_visible:
-            cards.append(RIGHT)
-        return cards
+        return [CAMERA, STATUS]
 
     def _layout_buttons(self, view):
         buttons = [
-            Button("swap_camera", "Swap camera", "C"),
-            Button("toggle_tracking", "Pause tracking" if view.awake else "Resume tracking", "S"),
+            Button("swap_camera", "Camera", "C"),
+            Button("toggle_tracking", "Pause" if view.awake else "Resume", "S"),
             Button("toggle_menu", "Hide menu" if view.menu_visible else "Show menu", "M"),
         ]
         if view.tour is not None and view.tour.step is not None:
             if not view.tour_required:
                 buttons.append(Button("tour", "End tour", "O"))
         else:
-            buttons.append(Button("tour", "Replay tour", "O"))
+            buttons.append(Button("tour", "Tour", "O"))
         buttons.append(Button("quit", "Quit", "Q"))
         x = BAR.x
         for b in buttons:
-            w = TextLayer.measure(b.label, 16, True)[0] + 76
+            w = TextLayer.measure(b.label, 15, True)[0] + 64
             b.rect = Rect(x, BAR.y + 6, w, 44)
-            x += w + 12
+            x += w + 10
         return buttons
 
     def render(self, view, now):
@@ -191,14 +172,10 @@ class UI:
         if self._toast and now > self._toast[1]:
             self._toast = None
 
-        self.penguin.update(now, view.events, view.scroll_mode, view.awake)
-
         self._draw_header(img, text, view)
-        self._draw_penguin(img, text)
         self._draw_camera(img, text, view)
         if not self._draw_tour(img, text, view, now):
             self._draw_status(img, text, view)
-        self._draw_menu(img, text, view, now)
         self.buttons = self._layout_buttons(view)
         self._draw_buttons(img, text)
         self._draw_extras(img, text, view, now)
@@ -246,22 +223,6 @@ class UI:
                            theme.YELLOW, theme.YELLOW_DARK, dot=theme.YELLOW, align="r")
         self._pill(img, text, r.x - 10, 38, view.camera_label, theme.PANEL,
                    theme.BORDER, theme.MUTED, align="r")
-
-    def _draw_penguin(self, img, text):
-        x = LEFT.x + 20
-        text.add("Pip", (x, LEFT.y + 30), 20, theme.TEXT, True, "lm")
-        text.add("copies your gestures", (x, LEFT.y + 54), 13, theme.MUTED, False, "lm")
-        stage = Rect(LEFT.x + 10, LEFT.y + 76, LEFT.w - 20, 404)
-        rounded_rect(img, stage, 16, theme.PANEL_ALT)
-        roi = img[stage.y:stage.bottom, stage.x:stage.right]  # keeps Pip inside
-        feet = (stage.w / 2, stage.h * 0.7)
-        self.penguin.draw_motion_hints(roi, feet)
-        self.penguin.draw(roi, feet)
-        for z, (zx, zy), size in self.penguin.zzz(feet):
-            text.add(z, (stage.x + zx, stage.y + zy), size, theme.MUTED, True, "mm")
-        self._pill(img, text, LEFT.cx, stage.bottom + 34, self.penguin.caption,
-                   theme.YELLOW_SOFT if self.penguin.mood != "idle" else theme.PANEL_ALT,
-                   None, theme.TEXT, 13, align="m")
 
     def camera_fit(self, frame):
         fh, fw = frame.shape[:2]
@@ -356,7 +317,7 @@ class UI:
             text.add(msg, (x, y + 146), 15, theme.MUTED, False, "lm")
             progress_bar(img, Rect(x, y + 160, STATUS.w - 56, 10), view.holding[1])
         else:
-            tip = ("Point up or down to scroll, left or right to switch tabs."
+            tip = ("Click your browser window, then point up/down to scroll, left/right for tabs."
                    if view.awake else "Gestures are ignored until you wake tracking.")
             text.add(tip, (x, y + 152), 15, theme.MUTED, False, "lm")
         if view.fps:
@@ -421,34 +382,6 @@ class UI:
             cv2.circle(img, c, 6, color, -1, cv2.LINE_AA)
         return True
 
-    def _draw_menu(self, img, text, view, now):
-        if not view.menu_visible:
-            self._pill(img, text, RIGHT.right, RIGHT.y + 18, "Menu hidden · hold pinky to show",
-                       theme.PANEL, theme.BORDER, theme.MUTED, 13, align="r")
-            return
-        x = RIGHT.x + 20
-        text.add("Gestures", (x, RIGHT.y + 30), 20, theme.TEXT, True, "lm")
-        text.add("Hold your pinky up to hide", (x, RIGHT.y + 54), 13, theme.MUTED, False, "lm")
-        row_h, top = 78, RIGHT.y + 76
-        for i, (label, title, action) in enumerate(MENU_ROWS):
-            row = Rect(RIGHT.x + 12, top + i * row_h, RIGHT.w - 24, row_h - 8)
-            active = view.confirmed == label and (view.awake or label in (TOGGLE_TRACKING,
-                                                                          TOGGLE_MENU))
-            step = view.tour.step if view.tour is not None else None
-            target = step is not None and step.icon == label
-            rounded_rect(img, row, 14, theme.YELLOW_SOFT if active else theme.PANEL_ALT)
-            if active or target:
-                rounded_rect(img, row, 14, theme.YELLOW, 2)
-            icon = Rect(row.x + 6, row.y + 6, row.h - 12, row.h - 12)
-            rounded_rect(img, icon, 12, theme.PANEL)
-            # draw inside the icon box only, so the demo motion never spills out
-            roi = img[icon.y:icon.bottom, icon.x:icon.right]
-            draw_gesture_icon(roi, (icon.w / 2, icon.h / 2), icon.h * 0.82, label,
-                              now + i * 0.3)
-            tx = icon.right + 12
-            text.add(title, (tx, row.cy - 11), 15, theme.TEXT, True, "lm")
-            text.add(action, (tx, row.cy + 12), 13, theme.MUTED, False, "lm")
-
     def _draw_buttons(self, img, text):
         mx, my = self.mouse
         for b in self.buttons:
@@ -457,12 +390,10 @@ class UI:
             border = theme.YELLOW if hover else theme.BORDER
             rounded_rect(img, b.rect, 22, fill)
             rounded_rect(img, b.rect, 22, border, 1)
-            text.add(b.label, (b.rect.x + 20, b.rect.cy), 16, theme.TEXT, True, "lm")
-            badge = Rect(b.rect.right - 42, b.rect.cy - 12, 24, 24)
+            text.add(b.label, (b.rect.x + 18, b.rect.cy), 15, theme.TEXT, True, "lm")
+            badge = Rect(b.rect.right - 38, b.rect.cy - 12, 24, 24)
             rounded_rect(img, badge, 7, theme.GREEN_SOFT)
             text.add(b.key, (badge.cx, badge.cy), 13, theme.GREEN_DARK, True, "mm")
-        text.add("Click your browser so it is the active window, then gesture.",
-                 (BAR.right, BAR.cy + 2), 14, theme.MUTED, False, "rm")
 
     def _draw_toast(self, img, text, label):
         self._pill(img, text, CAMERA.cx, CAMERA.y + 30, label, theme.GREEN_DARK, None,
@@ -472,7 +403,7 @@ class UI:
 def render_message(title, body):
     """A plain full-window message, e.g. when the hand model can't be loaded."""
     img = np.full((HEIGHT, WIDTH, 3), theme.BG, np.uint8)
-    box = Rect(WIDTH // 2 - 360, HEIGHT // 2 - 130, 720, 260)
+    box = Rect(WIDTH // 2 - 340, HEIGHT // 2 - 130, 680, 260)
     soft_shadow(img, box)
     card(img, box)
     text = TextLayer()

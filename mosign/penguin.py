@@ -41,7 +41,9 @@ CAPTIONS = {
 
 
 class Penguin:
-    def __init__(self):
+    def __init__(self, max_x=MAX_X, max_y=MAX_Y):
+        self.max_x = float(max_x)   # how far Pip may move, in pixels
+        self.max_y = float(max_y)
         self.x = 0.0
         self.y = 0.0
         self.vx = 0.0
@@ -71,18 +73,18 @@ class Penguin:
         for event in events:
             if event in ("prev_tab", "next_tab"):
                 d = -1 if event == "prev_tab" else 1
-                self.vx += 260 * d
-                self._push_x = MAX_X * d
+                self.vx += 260 * d * self.max_x / MAX_X
+                self._push_x = self.max_x * d
                 self._push_until = now + 0.55
                 self.facing = d
                 self._set_mood("left" if d < 0 else "right", now)
             elif event == "sleep":
                 self._set_mood("sleep", now, 0)
             elif event == "wake":
-                self.vy -= 650
+                self.vy -= 650 * self.max_y / MAX_Y
                 self._set_mood("wake", now, 1.2)
             elif event == "celebrate":
-                self.vy -= 700
+                self.vy -= 700 * self.max_y / MAX_Y
                 self._wave_until = now + CELEBRATE_WAVE
                 self._set_mood("party", now, CELEBRATE_WAVE)
             elif event in ("menu_on", "menu_off"):
@@ -93,14 +95,14 @@ class Penguin:
         target_x = self._push_x if now < self._push_until else 0.0
         target_y = 0.0
         if self.asleep:
-            target_y = 14
+            target_y = 0.15 * self.max_y
             self.mood = "sleep"
         elif scroll_mode == "up":
-            target_y = -60 - abs(math.sin(self._t * 9)) * 22   # little hops
+            target_y = -(0.63 + 0.23 * abs(math.sin(self._t * 9))) * self.max_y  # hops
             self.look_y = -1
             self.mood = "up"
         elif scroll_mode == "down":
-            target_y = 60
+            target_y = 0.63 * self.max_y
             self.look_y = 1
             self.mood = "down"
         else:
@@ -119,11 +121,11 @@ class Penguin:
         self.x += self.vx * dt
         self.y += self.vy * dt
         # keep Pip inside the panel
-        if abs(self.x) > MAX_X:
-            self.x = math.copysign(MAX_X, self.x)
+        if abs(self.x) > self.max_x:
+            self.x = math.copysign(self.max_x, self.x)
             self.vx *= -0.3
-        if abs(self.y) > MAX_Y:
-            self.y = math.copysign(MAX_Y, self.y)
+        if abs(self.y) > self.max_y:
+            self.y = math.copysign(self.max_y, self.y)
             self.vy *= -0.3
         self.lean = max(-18.0, min(18.0, self.vx * 0.04))
 
@@ -154,7 +156,7 @@ class Penguin:
                         angle + self.lean, 0, 360, color, thickness, AA)
 
         # ground shadow shrinks as Pip rises
-        lift = max(0.0, -self.y) / MAX_Y
+        lift = max(0.0, -self.y) / self.max_y
         sw = int((46 - 18 * lift) * s)
         cv2.ellipse(img, ipt((center[0] + self.x, center[1] + 6 * s)), (sw, int(8 * s)),
                     0, 0, 360, theme.GREEN_SOFT, -1, AA)

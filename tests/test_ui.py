@@ -22,7 +22,10 @@ def test_every_preview_scene_renders(tmp_path):
     assert len(paths) >= 6
     for p in paths:
         img = cv2.imread(str(p))
-        assert img.shape == (HEIGHT, WIDTH, 3)
+        if p.stem.endswith("_screen"):     # overlay drawn over a fake web page
+            assert img.shape[1] == 1440 and img.shape[0] >= 900
+        else:
+            assert img.shape == (HEIGHT, WIDTH, 3)
 
 
 def test_background_is_light_green():
@@ -36,10 +39,10 @@ def test_buttons_are_clickable():
     names = {b.command for b in ui.buttons}
     assert {"swap_camera", "toggle_tracking", "quit"} <= names
     swap = next(b for b in ui.buttons if b.command == "swap_camera")
-    ui.on_mouse(cv2.EVENT_LBUTTONUP, swap.rect.cx, swap.rect.cy)
+    ui.click(swap.rect.cx, swap.rect.cy)
     assert ui.pop_commands() == ["swap_camera"]
     assert ui.pop_commands() == []
-    ui.on_mouse(cv2.EVENT_LBUTTONUP, 5, 5)  # empty space
+    ui.click(5, 5)  # empty space
     assert ui.pop_commands() == []
 
 
@@ -47,7 +50,7 @@ def test_pause_button_label_follows_state():
     ui = UI()
     ui.render(View(awake=False), now=0)
     labels = [b.label for b in ui.buttons]
-    assert "Resume tracking" in labels
+    assert "Resume" in labels
 
 
 def test_odd_camera_sizes_fit():
@@ -74,28 +77,6 @@ def test_message_screen_wraps_long_text():
     assert img.shape == (HEIGHT, WIDTH, 3)
 
 
-def test_menu_panel_shows_and_hides():
-    from mosign.ui import RIGHT
-    ui = UI()
-    shown = ui.render(View(menu_visible=True), now=0)
-    hidden = ui.render(View(menu_visible=False), now=0)
-    region = (slice(RIGHT.y + 80, RIGHT.bottom), slice(RIGHT.x, RIGHT.right))
-    assert np.any(shown[region] != hidden[region], axis=2).mean() > 0.3
-    # hidden: the lower part of the panel area is plain background
-    assert np.all(hidden[RIGHT.bottom - 20, RIGHT.x + 20] == theme.BG)
-
-
-def test_menu_highlights_current_gesture():
-    from mosign.ui import RIGHT
-    ui = UI()
-    plain = ui.render(View(), now=0)
-    lit = ui.render(View(confirmed="next_tab"), now=0)
-    region = (slice(RIGHT.y, RIGHT.bottom), slice(RIGHT.x, RIGHT.right))
-    yellow = np.all(np.abs(lit[region].astype(int) - theme.YELLOW_SOFT) < 6, axis=2)
-    assert yellow.sum() > 2000
-    assert not np.array_equal(plain[region], lit[region])
-
-
 def test_menu_button_present():
     ui = UI()
     ui.render(View(menu_visible=False), now=0)
@@ -111,18 +92,7 @@ def test_all_gesture_icons_draw():
             assert (img != 250).any(axis=2).sum() > 300
 
 
-def test_penguin_panel_reacts_to_events():
-    from mosign.ui import LEFT
-    ui = UI()
-    still = ui.render(View(), now=0.0)
-    ui.render(View(events=["next_tab"]), now=0.03)
-    moved = ui.render(View(), now=0.15)
-    region = (slice(LEFT.y, LEFT.bottom), slice(LEFT.x, LEFT.right))
-    assert not np.array_equal(still[region], moved[region])
-    assert ui.penguin.caption.startswith("Waddling")
-
-
-def test_tour_card_replaces_status_and_highlights_menu_row():
+def test_tour_card_replaces_status():
     from mosign.onboarding import Onboarding
     from mosign.ui import STATUS
     ui = UI()
@@ -137,7 +107,7 @@ def test_tour_card_replaces_status_and_highlights_menu_row():
     ui.render(View(tour=tour, tour_required=False), now=0)
     assert any(b.label == "End tour" for b in ui.buttons)
     ui.render(View(), now=0)
-    assert any(b.label == "Replay tour" for b in ui.buttons)
+    assert any(b.label == "Tour" for b in ui.buttons)
 
 
 def test_hand_outside_frame_is_clipped_to_camera():
@@ -150,3 +120,12 @@ def test_hand_outside_frame_is_clipped_to_camera():
     # the gap between the camera and the status card must stay untouched
     below = (slice(CAMERA.bottom, STATUS.y), slice(CAMERA.x, CAMERA.right))
     assert np.array_equal(a[below], b[below])
+
+
+def test_main_window_buttons_fit_in_the_bar():
+    from mosign.ui import BAR
+    ui = UI()
+    for view in (View(), View(awake=False, menu_visible=False)):
+        ui.render(view, now=0)
+        assert ui.buttons[-1].rect.right <= BAR.right
+
