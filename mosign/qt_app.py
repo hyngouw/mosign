@@ -151,10 +151,13 @@ class OverlayWindow(QWidget):
             self.show()
         if not self._configured:
             self._configured = True
-            # stay on top across apps and Spaces, including full-screen apps
-            macos.configure_overlay(
-                self, schedule=lambda ms, fn: QTimer.singleShot(ms, fn),
-                hide_dock_icon=self.hide_dock_icon)
+            # Only real macOS windows have an NSWindow behind them (not the
+            # "offscreen" platform used by tests and CI): never poke a fake one.
+            if QGuiApplication.platformName() == "cocoa":
+                # stay on top across apps and Spaces, including full-screen apps
+                macos.configure_overlay(
+                    self, schedule=lambda ms, fn: QTimer.singleShot(ms, fn),
+                    hide_dock_icon=self.hide_dock_icon)
         self.update()
 
     def paintEvent(self, event):

@@ -115,3 +115,10 @@ def test_hide_dock_icon_flag_is_remembered_and_passed_on(qt_fakes, monkeypatch):
     assert seen["hide_dock_icon"] is True            # remembered
     app.main(["--max-frames", "2", "--show-dock-icon"])
     assert seen["hide_dock_icon"] is False and not Config.load().hide_dock_icon
+
+
+def test_mac_window_tweaks_skipped_without_a_real_mac_window(qt_fakes, monkeypatch):
+    calls = []
+    monkeypatch.setattr(qt_app.macos, "configure_overlay", lambda *a, **k: calls.append(1))
+    app.main(["--max-frames", "3"])
+    assert QGuiApplication.platformName() == "offscreen" and calls == []
