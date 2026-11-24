@@ -73,5 +73,5 @@ Windows has a similar warning ("Windows protected your PC" → **More info → R
 - **Gestures show in the app but nothing happens in the browser:** Accessibility permission (step 4 above). If you rebuilt the app, remove the old Mosign entry from the Accessibility list and add the new one, because macOS ties the permission to that exact build.
 - **Wrong camera:** press `C` (or **Swap camera**) in the app. The choice is remembered.
 - **App size:** expect roughly 250–550 MB, mostly MediaPipe, OpenCV and Qt.
-- **Overlay not showing over a full-screen browser (macOS):** the overlay is set to appear on every desktop and next to full-screen apps, but macOS can still hide it over some full-screen windows. Use the browser in a normal (maximised) window instead.
+- **Overlay not showing over a full-screen browser (macOS):** Mosign briefly runs as a background app while the overlay opens, so it can float over full-screen apps. If it still doesn't appear, run Mosign once with `--hide-dock-icon` (Terminal: `/Applications/Mosign.app/Contents/MacOS/Mosign --hide-dock-icon`). It's remembered, and Mosign then runs without a Dock icon, which macOS reliably allows over full-screen apps. `--show-dock-icon` undoes it.
 - **Settings and reset:** settings live in `~/.mosign/config.json`. Delete that file to start fresh, including the first-run tour.

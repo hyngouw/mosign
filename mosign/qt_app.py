@@ -131,6 +131,7 @@ class OverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.image = None
         self._configured = False
+        self.hide_dock_icon = False
 
     def corner_position(self, w, h):
         screen = QGuiApplication.primaryScreen()
@@ -150,7 +151,10 @@ class OverlayWindow(QWidget):
             self.show()
         if not self._configured:
             self._configured = True
-            macos.configure_overlay(self)   # stay on top across apps and Spaces
+            # stay on top across apps and Spaces, including full-screen apps
+            macos.configure_overlay(
+                self, schedule=lambda ms, fn: QTimer.singleShot(ms, fn),
+                hide_dock_icon=self.hide_dock_icon)
         self.update()
 
     def paintEvent(self, event):
@@ -184,7 +188,7 @@ def show_message(img, max_frames=None):
     app.exec()
 
 
-def run(make_engine, max_frames=None, clock=time.time):
+def run(make_engine, max_frames=None, clock=time.time, hide_dock_icon=False):
     """Show both windows and run the engine until the user quits.
 
     make_engine(overlay_scale) builds the Engine once Qt knows the screen's
@@ -198,6 +202,7 @@ def run(make_engine, max_frames=None, clock=time.time):
     main.on_click = lambda x, y: engine.ui.click(x, y)
     main.on_hover = lambda x, y: engine.ui.hover(x, y)
     overlay = OverlayWindow()
+    overlay.hide_dock_icon = hide_dock_icon
     main.show()
 
     frames = 0

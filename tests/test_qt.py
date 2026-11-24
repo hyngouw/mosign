@@ -98,3 +98,20 @@ def test_premultiplied_overlay_pixels_survive_conversion():
     assert (red.red(), red.green(), red.blue()) == (255, 0, 0) and abs(red.alpha() - 128) <= 1
     assert q.pixelColor(1, 1).blue() == 255 and q.pixelColor(1, 1).alpha() == 255
     assert q.pixelColor(1, 0).alpha() == 0
+
+
+def test_hide_dock_icon_flag_is_remembered_and_passed_on(qt_fakes, monkeypatch):
+    seen = {}
+    real_run = qt_app.run
+
+    def spy(make_engine, **kw):
+        seen.update(kw)
+        return real_run(make_engine, **kw)
+
+    monkeypatch.setattr(qt_app, "run", spy)
+    app.main(["--max-frames", "2", "--hide-dock-icon"])
+    assert seen["hide_dock_icon"] is True and Config.load().hide_dock_icon
+    app.main(["--max-frames", "2"])
+    assert seen["hide_dock_icon"] is True            # remembered
+    app.main(["--max-frames", "2", "--show-dock-icon"])
+    assert seen["hide_dock_icon"] is False and not Config.load().hide_dock_icon

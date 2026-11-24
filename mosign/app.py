@@ -17,6 +17,11 @@ def parse_args(argv=None):
     parser.add_argument("--tour", action="store_true", help="run the quick tour again")
     parser.add_argument("--skip-tour", action="store_true",
                         help="skip the first-run tour (e.g. if the camera can't see you)")
+    parser.add_argument("--hide-dock-icon", action="store_true",
+                        help="macOS: run without a Dock icon (remembered). Most reliable "
+                             "way to keep the overlay over full-screen apps")
+    parser.add_argument("--show-dock-icon", action="store_true",
+                        help="macOS: undo --hide-dock-icon")
     parser.add_argument("--self-test", action="store_true",
                         help="check the install (no camera or window needed) and exit")
     parser.add_argument("--max-frames", type=int, default=None, help=argparse.SUPPRESS)
@@ -75,6 +80,9 @@ def main(argv=None):
     cfg = Config.load()
     if args.camera is not None:
         cfg.camera_index = args.camera
+    if args.hide_dock_icon or args.show_dock_icon:
+        cfg.hide_dock_icon = bool(args.hide_dock_icon)
+        cfg.save()
     if args.skip_tour and not cfg.onboarding_complete:
         cfg.onboarding_complete = True
         cfg.save()
@@ -92,4 +100,5 @@ def main(argv=None):
     def make_engine(overlay_scale):
         return Engine(cfg, overlay_scale=overlay_scale, start_tour=args.tour, tracker=tracker)
 
-    return qt_app.run(make_engine, max_frames=args.max_frames)
+    return qt_app.run(make_engine, max_frames=args.max_frames,
+                      hide_dock_icon=cfg.hide_dock_icon)

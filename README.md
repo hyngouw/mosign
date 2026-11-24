@@ -43,7 +43,7 @@ If your camera can't see you and you need to get past the tour, start the app wi
 
 Mosign has two parts:
 
-- **The on-screen overlay**, in the top-right corner of your screen and floating above every other app, including your browser. It holds **Pip the penguin**, who copies what you do: hops up while you scroll up, slides down while you scroll down, waddles left or right when you switch tabs, waves when you toggle the menu, and naps while tracking is paused. Below Pip is the **Gestures** menu, which shows every gesture with a small animated hand and lights up the one you're doing. Hold your pinky up for 1 second to hide or show the menu (Pip stays). Clicks go straight through the overlay, and it never takes focus away from your browser.
+- **The on-screen overlay**, in the top-right corner of your screen and floating above every other app, including your browser. It holds **Pip the penguin**, who copies what you do: hops up while you scroll up, slides down while you scroll down, waddles left or right when you switch tabs, waves when you toggle the menu, and naps while tracking is paused. Below Pip is the **Gestures** menu, which shows every gesture with a small animated hand and lights up the one you're doing. Hold your pinky up for 1 second to hide or show the menu (Pip stays). Clicks go straight through the overlay, and it never takes focus away from your browser. It also shows over full-screen apps; if it doesn't on your Mac, start Mosign once with `--hide-dock-icon` (remembered; `--show-dock-icon` undoes it).
 - **The Mosign window**, a light-green window that shows your camera with your hand's skeleton drawn on top, plus a "Right now" card that says which gesture it sees. This is also where the quick tour runs. You can move it out of the way or minimise it; closing it quits Mosign.
 
 | Key / button (in the Mosign window) | Action |
@@ -104,7 +104,7 @@ Click on your browser window so it is the active window, then show your gestures
 
 Press `Q` in the Mosign window to quit, or `Ctrl+C` in the terminal.
 
-Options: `--camera N` (start with camera N), `--tour` (replay the tour), `--skip-tour`, `--self-test`.
+Options: `--camera N` (start with camera N), `--tour` (replay the tour), `--skip-tour`, `--hide-dock-icon` / `--show-dock-icon` (macOS), `--self-test`.
 
 **Emergency stop:** move your mouse into a corner of the screen (PyAutoGUI failsafe).
 
