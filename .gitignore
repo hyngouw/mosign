@@ -11,3 +11,8 @@ models/*.task
 .venv-build/
 packaging/*.icns
 packaging/*.iconset/
+.venv/
+mosign/models/
+mosign/mosign-design-files/
+mosign/models/
+mosign/mosign-design-files/

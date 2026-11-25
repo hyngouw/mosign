@@ -101,7 +101,8 @@ def main(argv=None):
         return 1
 
     def make_engine(overlay_scale):
-        return Engine(cfg, overlay_scale=overlay_scale, start_tour=args.tour, tracker=tracker)
+        return Engine(cfg, overlay_scale=overlay_scale, start_tour=args.tour, tracker=tracker,
+                      welcome_back=True)
 
     return qt_app.run(make_engine, max_frames=args.max_frames,
                       hide_dock_icon=cfg.hide_dock_icon)

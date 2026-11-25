@@ -122,3 +122,16 @@ def test_mac_window_tweaks_skipped_without_a_real_mac_window(qt_fakes, monkeypat
     monkeypatch.setattr(qt_app.macos, "configure_overlay", lambda *a, **k: calls.append(1))
     app.main(["--max-frames", "3"])
     assert QGuiApplication.platformName() == "offscreen" and calls == []
+
+
+def test_window_asks_for_a_sharp_picture_size(monkeypatch):
+    qt_app.get_app()
+    win = qt_app.CanvasWindow()
+    assert 2.0 <= win.pixel_scale() <= 2.5
+    # a very sharp screen asks for no more than 2.5 real pixels per logical pixel
+    monkeypatch.setattr(win, "devicePixelRatioF", lambda: 6.0)
+    assert win.pixel_scale() == 2.5
+    # a plain screen still draws at 2x so the edges are smooth
+    monkeypatch.setattr(win, "devicePixelRatioF", lambda: 0.25)
+    assert win.pixel_scale() == 2.0
+    win.close()

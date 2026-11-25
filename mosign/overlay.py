@@ -15,7 +15,7 @@ draw, without needing alpha-aware versions of every helper.
 import numpy as np
 
 from mosign import theme
-from mosign.draw import Rect, TextLayer, card, progress_bar, rounded_rect, soft_shadow
+from mosign.draw import Rect, TextLayer, card, progress_bar, rounded_rect, soft_shadow, wrap_text
 from mosign.gestures import (
     NEXT_TAB,
     PREV_TAB,
@@ -32,7 +32,7 @@ HOME_HEIGHT = 140   # top part: the cat's home spot + the status pill
 STATUS_Y = 122      # centre of the status pill
 HOME_FEET_Y = 100   # where the cat's feet go when it's home
 MENU_GAP = 4
-MENU_HEADER = 44
+MENU_HEADER = 36
 ROW_HEIGHT = 50
 MENU_PAD = 8
 SIDE = 8            # room for the card shadow
@@ -45,8 +45,8 @@ MENU_ROWS = [
     (SCROLL_DOWN, "Point down", "Scroll down"),
     (PREV_TAB, "Point left", "Previous tab"),
     (NEXT_TAB, "Point right", "Next tab"),
-    (TOGGLE_TRACKING, "Hold rock horns", "Pause / resume tracking"),
-    (TOGGLE_MENU, "Hold pinky up", "Hide / show this menu"),
+    (TOGGLE_TRACKING, "Hold rock horns", "Turn tracking off or on"),
+    (TOGGLE_MENU, "Hold pinky up", "Hide or show the gesture guide"),
 ]
 
 MENU_HEIGHT = MENU_HEADER + len(MENU_ROWS) * ROW_HEIGHT + MENU_PAD
@@ -176,12 +176,10 @@ class Overlay:
     def _draw_menu(self, img, text, view, now):
         s = self.scale
         box = self._menu_card()
-        card(img, box, self._px(16), theme.PANEL, theme.BORDER)
-
-        text.add("Gestures", (box.x + 14 * s, box.y + 23 * s), self._px(16), theme.TEXT, True,
-                 "lm")
-        text.add("hold pinky to hide", (box.right - 14 * s, box.y + 24 * s), self._px(11),
-                 theme.MUTED, False, "rm")
+        # the gesture guide is one butter container with a white row per gesture
+        card(img, box, self._px(16), theme.YELLOW_SOFT, theme.BORDER)
+        text.add("Gesture guide", (box.x + 14 * s, box.y + 20 * s), self._px(12), theme.TEXT,
+                 True, "lm")
 
         step = view.tour.step if view.tour is not None else None
         for i, (label, title, action) in enumerate(MENU_ROWS):
@@ -190,15 +188,19 @@ class Overlay:
             active = view.confirmed == label and (
                 view.awake or label in (TOGGLE_TRACKING, TOGGLE_MENU))
             target = step is not None and step.icon == label
-            rounded_rect(img, row, self._px(12), theme.YELLOW_SOFT if active else theme.PANEL_ALT)
-            if active or target:
+            rounded_rect(img, row, self._px(12), theme.YELLOW if active else theme.PANEL)
+            if target and not active:
                 rounded_rect(img, row, self._px(12), theme.YELLOW, max(2, self._px(1.5)))
+            # every hand sits in its own mint tile, all the same size
             icon = Rect(row.x + self._px(4), row.y + self._px(4),
                         row.h - self._px(8), row.h - self._px(8))
-            rounded_rect(img, icon, self._px(9), theme.PANEL)
+            rounded_rect(img, icon, self._px(10), theme.PANEL_ALT)
             roi = img[icon.y:icon.bottom, icon.x:icon.right]   # clip the demo motion
-            draw_gesture_icon(roi, (icon.w / 2, icon.h / 2), icon.h * 0.84, label,
+            draw_gesture_icon(roi, (icon.w / 2, icon.h / 2), icon.h * 1.05, label,
                               now + i * 0.3)
             tx = icon.right + self._px(10)
-            text.add(title, (tx, row.cy - 8 * s), self._px(13), theme.TEXT, True, "lm")
-            text.add(action, (tx, row.cy + 9 * s), self._px(11.5), theme.MUTED, False, "lm")
+            size = self._px(12)
+            lines = wrap_text(action, size, row.right - tx - self._px(8), True)[:2]
+            top = row.cy - (len(lines) - 1) * size * 0.65
+            for k, line in enumerate(lines):
+                text.add(line, (tx, top + k * size * 1.3), size, theme.TEXT, True, "lm")

@@ -24,6 +24,8 @@ class Config:
     hold_seconds: float = 1.0    # how long to hold the special gestures
     menu_visible: bool = True    # gesture reference menu in the top right
     onboarding_complete: bool = False  # first-run tour finished
+    user_name: str = ""          # shown in "Welcome back, ..."
+    sounds: bool = True          # chime when a tutorial gesture is recognised
     hide_dock_icon: bool = False  # macOS: no Dock icon; overlay most reliable over full screen
 
     @classmethod

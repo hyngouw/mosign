@@ -1,8 +1,15 @@
 """Colors and fonts. Colors are BGR tuples because OpenCV uses BGR."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from PIL import ImageFont
+
+FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
+# Put these files in mosign/assets/fonts/ (see the README there). Anything missing
+# falls back to the system fonts below, so the app always runs.
+BODY_FILES = {False: ["Outfit-Regular.ttf"], True: ["Outfit-Bold.ttf", "Outfit-SemiBold.ttf"]}
+BRAND_FILES = ["MadimiOne-Regular.ttf"]
 
 
 def bgr(hex_color):
@@ -11,19 +18,21 @@ def bgr(hex_color):
     return (b, g, r)
 
 
-# Light green base, dark green text, yellow accents
-BG = bgr("#EAF6E4")           # window background
-PANEL = bgr("#FAFDF7")        # cards
-PANEL_ALT = bgr("#F1F9EC")    # rows inside cards
-BORDER = bgr("#CDE6C3")
-GREEN_SOFT = bgr("#D5EFCC")
-GREEN = bgr("#5DB36A")
-GREEN_DARK = bgr("#2F7D45")
-TEXT = bgr("#1F3A2B")         # main text: ~11:1 contrast on BG
-MUTED = bgr("#4F6E5A")        # secondary text: ~5:1 contrast on BG
-YELLOW = bgr("#F6C945")
-YELLOW_SOFT = bgr("#FFF3C4")
-YELLOW_DARK = bgr("#8A6A00")  # readable text on yellow-soft
+# Mosign design system: butter-yellow window, white cards, mint tiles,
+# brand yellow (#F6DE5E) and green (#2C9E36), dark green text.
+BG = bgr("#FFF4B8")           # window background (butter)
+PANEL = bgr("#FFFFFF")        # cards
+PANEL_ALT = bgr("#EAF4E7")    # mint: tiles and rows inside cards
+BORDER = bgr("#D3E3CF")
+GREEN_SOFT = bgr("#DDEFD8")
+GREEN = bgr("#2C9E36")
+GREEN_DARK = bgr("#1F6F2B")
+TEXT = bgr("#1F3D23")         # main text: ~10:1 contrast on BG
+MUTED = bgr("#5D7260")        # secondary text: ~4.6:1 contrast on BG
+YELLOW = bgr("#F6DE5E")       # the app icon's yellow
+YELLOW_HOVER = bgr("#EBCB3A")  # primary button under the mouse
+YELLOW_SOFT = bgr("#FFF4B8")
+YELLOW_DARK = bgr("#6B5600")  # readable text on yellow-soft
 WHITE = (255, 255, 255)
 SHADOW = bgr("#2F5A3A")
 
@@ -44,8 +53,22 @@ _REGULAR_FONTS = [
 ]
 
 
+def _bundled(names, size):
+    for name in names:
+        try:
+            return ImageFont.truetype(str(FONT_DIR / name), size)
+        except OSError:
+            continue
+    return None
+
+
 @lru_cache(maxsize=64)
 def font(size, bold=False):
+    """Madimi One for the wordmark (bold="brand"), Outfit for everything else, then system fonts."""
+    brand = bold == "brand"
+    found = _bundled(BRAND_FILES if brand else BODY_FILES[bool(bold)], size)
+    if found is not None:
+        return found
     for path in _BOLD_FONTS if bold else _REGULAR_FONTS:
         try:
             return ImageFont.truetype(path, size)

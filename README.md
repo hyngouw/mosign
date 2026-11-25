@@ -31,21 +31,18 @@ The camera view is mirrored, so "left" means your left.
 
 While tracking is off, only the rock-horns gesture is watched for, so you can rest your hands or talk with them freely.
 
-## Quick tour (first run)
+## First run: welcome and tutorial
+The first time you open Mosign you see a welcome screen, a camera screen, and then a six-gesture tutorial. The tutorial shows your real camera and reads your real hand: hold each gesture (point up, down, left, right, rock horns, pinky up) for under a second (0.8 s) while a progress bar fills, and a chime plays when it is done. Every step works the same way, and there are no buttons to press. During the tutorial the app is in **practice mode**: nothing is sent to your browser. Afterwards gestures go live and you see "You're ready!". Returning users get a short "Welcome back" screen. Replay the tutorial any time with `O` or **Tour**; turn the chime off with `"sounds": false` in `~/.mosign/config.json`.
 
-The first time you open Mosign it walks you through every control: show your hand, point up, down, left and right, hide and show the menu, then pause and resume tracking. Each step only finishes when you actually do the gesture, so by the end you've used every control at least once.
-
-During the tour the app is in **practice mode**: gestures are recognised and the cat reacts, but nothing is sent to your browser. When you finish, gestures go live and the tour won't appear again. Replay it any time with `O` or **Tour**.
-
-If your camera can't see you and you need to get past the tour, start the app with `--skip-tour`.
+If your camera can't see you and you need to get past the tutorial, click the X on it or start the app with `--skip-tour`.
 
 ## The app window
 
 Mosign has two parts:
 
 - **The cat**, a little calico that lives on your screen above every app. When you switch tabs it **jumps onto the tab you moved to**: point right and it leaps onto the next tab, point left and it leaps back. It sits on the right side of the active tab, next to the close button. While you scroll it looks up or down. Pause tracking and it **falls asleep** (eyes closed, floating Z's); wake it and it opens its eyes wide. On macOS it finds the tabs through the Accessibility permission Mosign already needs, and works with Chrome, Safari, Edge, Brave and Firefox. When it can't see any tabs (Windows, a full-screen browser with the tab bar hidden, or another app in front), it sits in the top-right corner and hops left or right in place.
-- **The gesture menu**, in the top-right corner below the cat's spot. It shows every gesture with a small animated hand and lights up the one you're doing; a small status pill shows what just happened, hold progress, or "Paused". Hold your pinky up for 1 second to hide or show the menu. Clicks go straight through the cat and the menu, and neither takes focus away from your browser. Both also show over full-screen apps; if they don't on your Mac, start Mosign once with `--hide-dock-icon` (remembered; `--show-dock-icon` undoes it).
-- **The Mosign window**, a light-green window that shows your camera with your hand's skeleton drawn on top, plus a "Right now" card that says which gesture it sees. This is also where the quick tour runs. You can move it out of the way or minimise it; closing it quits Mosign.
+- **The gesture menu**, in the top-right corner below the cat's spot. It shows every gesture with an illustrated hand in its own mint tile and lights up the one you're doing; a small status pill shows what just happened, hold progress, or "Paused". Hold your pinky up for 1 second to hide or show the menu. Clicks go straight through the cat and the menu, and neither takes focus away from your browser. Both also show over full-screen apps; if they don't on your Mac, start Mosign once with `--hide-dock-icon` (remembered; `--show-dock-icon` undoes it).
+- **The Mosign window**, a light-green window that shows your camera with your hand's skeleton drawn on top, plus a card that says which gesture it sees. This is also where the quick tour runs. You can move it out of the way or minimise it; closing it quits Mosign.
 
 | Key / button (in the Mosign window) | Action |
 |---|---|
@@ -128,7 +125,7 @@ python scripts/preview_ui.py        # render the window to build/preview/*.png
 python -m mosign --self-test        # check the install
 ```
 
-Code layout: `mosign/gestures.py` (gesture rules), `controller.py` (gestures to actions), `onboarding.py` (tour), `engine.py` (one frame: camera to actions to pictures), `ui.py` (main window picture), `overlay.py` (overlay picture with transparency), `cat.py` (the cat: looks, animation, jumping), `tabs.py` (finding browser tabs), `icons.py` (gesture pictures), `qt_app.py` / `macos.py` (the actual windows), `tracker.py` (MediaPipe), `camera.py`, `config.py`, `app.py` (start-up).
+Code layout: `mosign/gestures.py` (gesture rules), `controller.py` (gestures to actions), `onboarding.py` (the six tutorial steps), `flow.py` and `screens.py` (welcome, camera, tutorial and ready screens), `sound.py` (the chime), `engine.py` (one frame: camera to actions to pictures), `ui.py` (main window picture), `overlay.py` (overlay picture with transparency), `cat.py` (the cat: looks, animation, jumping), `tabs.py` (finding browser tabs), `icons.py` (gesture pictures), `qt_app.py` / `macos.py` (the actual windows), `tracker.py` (MediaPipe), `camera.py`, `config.py`, `app.py` (start-up).
 
 ## Credits
 

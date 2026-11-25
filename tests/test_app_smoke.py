@@ -157,30 +157,70 @@ def test_first_run_is_practice_mode(make):
     assert not Config.load().onboarding_complete
 
 
-def test_completing_the_tour_turns_gestures_on(make):
+ONBOARDING_KEYS = {1: ["flow_next"], 2: ["flow_next"]}
+
+
+def tutorial_script():
     def pose(fingers, rot, n):
         return [make_hand(fingers, rot)] * n
 
     rest = [None] * 40          # lower the hand between steps
-    script = (
-        pose({"thumb", "index", "middle", "ring", "pinky"}, 0, 40) + rest
-        + pose({"index"}, 0, 50) + rest              # point up
-        + pose({"index"}, 180, 50) + rest            # point down
-        + pose({"index"}, 90, 15) + rest             # point left
-        + pose({"index"}, -90, 15) + rest            # point right
-        + pose({"pinky"}, 0, 45) + rest              # hide menu
-        + pose({"pinky"}, 0, 45) + rest              # show menu
-        + pose({"index", "pinky"}, 0, 45) + rest     # pause
-        + pose({"index", "pinky"}, 0, 45) + rest     # resume
+    hold = 40                   # a bit over the 0.8 second hold every step needs
+    return (
+        [None] * 6
+        + pose({"index"}, 0, hold) + rest              # point up
+        + pose({"index"}, 180, hold) + rest            # point down
+        + pose({"index"}, 90, hold) + rest             # point left
+        + pose({"index"}, -90, hold) + rest            # point right
+        + pose({"index", "pinky"}, 0, hold) + rest     # rock horns
+        + pose({"pinky"}, 0, hold) + rest              # pinky
     )
+
+
+def test_completing_the_tutorial_turns_gestures_on(make):
+    script = tutorial_script()
     tour_frames = len(script)
-    script += pose({"index"}, -90, 15)               # a real gesture afterwards
+    script += [make_hand({"index"}, -90)] * 15       # a real gesture afterwards
     engine, rec = make(script=script, first_run=True)
-    run(engine, len(script) + 5)
+    engine.sound.enabled = True
+    played = []
+    engine.sound.play = lambda: played.append(1)
+    run(engine, len(script) + 60, ONBOARDING_KEYS)
 
     assert Config.load().onboarding_complete
-    assert Config.load().menu_visible  # ended up shown again
-    assert rec.calls == [("next_tab",)], f"tour took {tour_frames} frames"
+    assert Config.load().menu_visible and engine.controller.awake   # put back after the tutorial
+    assert rec.calls == [("next_tab",)], f"tutorial took {tour_frames} frames"
+    assert len(played) == 6                          # one chime per gesture, from the real hand
+    assert engine.flow.stage == "ready"              # the "You're ready!" screen
+    run(engine, 2, {0: ["flow_next"]}, t0=100)
+    assert engine.flow is not None                     # fading out first...
+    run(engine, 30, t0=101)
+    assert engine.flow is None                         # ...then straight to the window
+
+
+def test_onboarding_screens_hide_the_overlay_and_ignore_gestures(make):
+    engine, rec = make(make_hand({"index"}), first_run=True)
+    out = run(engine, 30)
+    assert engine.flow.stage == "welcome" and not out.show_overlay
+    assert rec.calls == []
+    run(engine, 4, {0: ["flow_next"], 1: ["flow_next"]}, t0=1)
+    assert engine.flow.stage == "tutorial"
+
+
+def test_welcome_back_shows_then_hands_over_to_the_window(make):
+    Config(onboarding_complete=True, user_name="Alex").save()
+    engine = Engine(Config.load(), tracker=FakeTracker(), actions=RecordingActions(),
+                    welcome_back=True)
+    out = run(engine, 5)
+    assert engine.flow.stage == "back" and out.show_overlay
+    out = run(engine, 5, t0=10)
+    assert engine.flow is None and out.show_overlay
+
+
+def test_close_on_first_screens_quits(make):
+    engine, _ = make(first_run=True)
+    out = run(engine, 3, {0: ["flow_close"]})
+    assert out.quit
 
 
 def test_tour_can_be_replayed_and_ended(make):
@@ -309,3 +349,20 @@ def test_cat_goes_home_when_tabs_disappear(make):
     tabs.info = None                # e.g. switched to a non-browser app
     out = settle(engine, 90, 3)
     assert out.cat_feet == pytest.approx((1300, 100))
+
+
+def test_last_hand_lands_in_its_slot_before_the_ready_screen(make):
+    from mosign.onboarding import LAND_PAUSE, STEP_PAUSE
+    script = tutorial_script()
+    engine, _ = make(script=script, first_run=True)
+    run(engine, 4, ONBOARDING_KEYS)
+    t = 1.0
+    while engine.tour is not None and not engine.tour.done:
+        t += 1 / 30
+        engine.step(t)
+    done_at = engine.tour.finished_at
+    t = done_at + STEP_PAUSE + LAND_PAUSE / 2          # landed, slot full, still on the tutorial
+    engine.step(t)
+    assert engine.flow.stage == "tutorial" and engine.tour.filled(t) == 6
+    engine.step(done_at + STEP_PAUSE + LAND_PAUSE + 0.1)
+    assert engine.flow.stage == "ready"
