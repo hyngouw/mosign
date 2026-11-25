@@ -5,6 +5,8 @@ Pip and the gesture menu live in the on-screen overlay (overlay.py).
 """
 
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -12,11 +14,19 @@ import numpy as np
 from mosign import theme
 from mosign.draw import (
     Rect,
+    S,
     TextLayer,
+    blend_bgra_premultiplied,
     blend_rect,
+    blend_rgba,
     card,
-    check_mark,
-    ipt,
+    circle,
+    corner_size,
+    drawing_scale,
+    line as draw_line,
+    region,
+    round_corners,
+    save_corners,
     paste,
     progress_bar,
     ring,
@@ -33,8 +43,10 @@ from mosign.gestures import (
     TOGGLE_MENU,
     TOGGLE_TRACKING,
 )
-from mosign.icons import draw_gesture_icon, draw_hand_icon
+from mosign.cat import CatFace, CatSprite
+from mosign.screens import FlowScreens
 from mosign.tracker import HAND_CONNECTIONS
+from mosign.ui_types import Button
 
 WIDTH, HEIGHT = 768, 780
 WINDOW_TITLE = "Mosign"
@@ -44,7 +56,22 @@ CAMERA = Rect(24, 88, 720, 405)     # 16:9 camera view
 STATUS = Rect(24, 509, 720, 182)    # "right now" / tour card
 BAR = Rect(24, 707, 720, 56)
 
-CAMERA_LETTERBOX = theme.bgr("#2C4A36")
+CAMERA_LETTERBOX = theme.PANEL_ALT   # mint behind the camera picture
+LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo.png"
+BUTTON_GAP = 12
+HEADER_DROP = 6      # centres the header contents between the window top and the camera (y=88)
+STATUS_RISE = 18     # status card contents sit this much higher (top gap ≈ side padding)
+CAT_HEIGHT_EMPTY = 168
+
+
+@lru_cache(maxsize=4)
+def _logo(height):
+    """The cat-face app icon, straight-alpha BGRA, `height` px tall (or None)."""
+    img = cv2.imread(str(LOGO_PATH), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return None
+    k = height / img.shape[0]
+    return cv2.resize(img, (max(1, round(img.shape[1] * k)), height), interpolation=cv2.INTER_AREA)
 
 GESTURE_NAMES = {
     SCROLL_UP: "Pointing up",
@@ -83,25 +110,36 @@ class View:
     menu_visible: bool = True
     tour: object = None             # Onboarding while the tour runs / celebrates
     tour_required: bool = False     # first run: the tour can't be skipped
-
-
-@dataclass
-class Button:
-    command: str
-    label: str
-    key: str
-    rect: Rect = None
+    flow: object = None             # onboarding screens (flow.Flow) instead of the main window
 
 
 class UI:
-    def __init__(self):
+    def __init__(self, scale=1.0):
+        """`scale`: real pixels per logical pixel (2 on Retina). The picture is drawn
+        at that size so text and edges stay sharp; layout and clicks stay logical."""
+        self.scale = float(scale)
         self.mouse = (-1, -1)
         self._commands = []
         self._toast = None   # (text, until)
         self._flash = None   # (text, until)
         self.buttons = []
-        self._camera_mask = rounded_mask(CAMERA.w, CAMERA.h, 18)
+        with drawing_scale(self.scale):
+            self._camera_mask = rounded_mask(CAMERA.w, CAMERA.h, 18)
         self._statics = {}
+        self._cat = None     # (CatSprite, CatFace): the cat shown when there is no camera picture
+        self._screens = None  # FlowScreens, built the first time an onboarding screen shows
+
+    def set_scale(self, scale):
+        """Draw at a different size (the window was resized or moved to another screen)."""
+        scale = float(scale)
+        if abs(scale - self.scale) < 1e-6:
+            return
+        self.scale = scale
+        with drawing_scale(scale):
+            self._camera_mask = rounded_mask(CAMERA.w, CAMERA.h, 18)
+        self._statics.clear()
+        self._cat = None
+        self._screens = None
 
     # ---------- input ----------
     def hover(self, x, y):
@@ -113,6 +151,10 @@ class UI:
                 self._commands.append(b.command)
                 return b.command
         return None
+
+    def key(self, text, name=""):
+        """A key press. No screen takes typed text any more, so this is always False."""
+        return False
 
     def pop_commands(self):
         cmds, self._commands = self._commands, []
@@ -126,7 +168,7 @@ class UI:
         """Background with card shadows. Built once per layout, then copied."""
         key = self._static_key(view)
         if key not in self._statics:
-            img = np.full((HEIGHT, WIDTH, 3), theme.BG, np.uint8)
+            img = np.full((S(HEIGHT), S(WIDTH), 3), theme.BG, np.uint8)
             cards = self._static_cards(view)
             for rect in cards:
                 soft_shadow(img, rect)
@@ -153,14 +195,25 @@ class UI:
         else:
             buttons.append(Button("tour", "Tour", "O"))
         buttons.append(Button("quit", "Quit", "Q"))
-        x = BAR.x
-        for b in buttons:
-            w = TextLayer.measure(b.label, 15, True)[0] + 64
-            b.rect = Rect(x, BAR.y + 6, w, 44)
-            x += w + 10
+        # equal widths and equal gaps, spread across the whole bar
+        n = len(buttons)
+        w = (BAR.w - BUTTON_GAP * (n - 1)) / n
+        for i, b in enumerate(buttons):
+            left = BAR.x + i * (w + BUTTON_GAP)
+            b.rect = Rect(int(round(left)), BAR.y + 6, int(round(left + w)) - int(round(left)), 44)
         return buttons
 
     def render(self, view, now):
+        with drawing_scale(self.scale):
+            return self._render(view, now)
+
+    def _render(self, view, now):
+        if view.flow is not None and not view.flow.finished:
+            if self._screens is None:
+                self._screens = FlowScreens(self)
+            img = self._screens.render(view, now)
+            self.buttons = self._screens.buttons
+            return img
         img = self._static(view).copy()
         text = TextLayer()
 
@@ -173,9 +226,8 @@ class UI:
             self._toast = None
 
         self._draw_header(img, text, view)
-        self._draw_camera(img, text, view)
-        if not self._draw_tour(img, text, view, now):
-            self._draw_status(img, text, view)
+        self._draw_camera(img, text, view, now)
+        self._draw_status(img, text, view)
         self.buttons = self._layout_buttons(view)
         self._draw_buttons(img, text)
         self._draw_extras(img, text, view, now)
@@ -202,27 +254,29 @@ class UI:
         if border is not None:
             rounded_rect(img, rect, h // 2, border, 1)
         if dot is not None:
-            cv2.circle(img, (rect.x + pad + 4, rect.cy), 5, dot, -1, cv2.LINE_AA)
+            circle(img, (rect.x + pad + 4, rect.cy), 5, dot, -1)
         text.add(label, (rect.x + pad + dot_w, rect.cy), size, color, True, "lm")
         return rect
 
     def _draw_header(self, img, text, view):
-        logo = Rect(28, 18, 40, 40)
-        rounded_rect(img, logo, 12, theme.GREEN)
-        cv2.circle(img, (logo.right - 9, logo.y + 9), 6, theme.YELLOW, -1, cv2.LINE_AA)
-        text.add("m", (logo.cx - 1, logo.cy + 1), 26, theme.WHITE, True, "mm")
-        text.add("Mosign", (80, 38), 28, theme.TEXT, True, "lm")
-        tw = TextLayer.measure("Mosign", 28, True)[0]
-        text.add("hand gesture control", (80 + tw + 12, 40), 15, theme.MUTED, False, "lm")
+        logo = Rect(28, 16 + HEADER_DROP, 44, 44)
+        rounded_rect(img, logo, 14, theme.YELLOW)
+        mark = _logo(S(32))
+        if mark is not None:
+            blend_rgba(img, mark, S(logo.cx) - mark.shape[1] // 2, S(logo.cy) - mark.shape[0] // 2)
+        text.add("Mosign", (84, 38 + HEADER_DROP), 28, theme.GREEN, "brand", "lm")
+        tw = TextLayer.measure("Mosign", 28, "brand")[0]
+        text.add("hand gesture control", (84 + tw + 12, 40 + HEADER_DROP), 15, theme.MUTED, False, "lm")
 
         if view.awake:
-            r = self._pill(img, text, WIDTH - 24, 38, "Tracking on", theme.GREEN_SOFT,
-                           theme.GREEN, theme.GREEN_DARK, dot=theme.GREEN, align="r")
+            r = self._pill(img, text, WIDTH - 24, 38 + HEADER_DROP, "Tracking on", theme.YELLOW, None,
+                           theme.TEXT, dot=theme.GREEN, align="r")
         else:
-            r = self._pill(img, text, WIDTH - 24, 38, "Paused", theme.YELLOW_SOFT,
-                           theme.YELLOW, theme.YELLOW_DARK, dot=theme.YELLOW, align="r")
-        self._pill(img, text, r.x - 10, 38, view.camera_label, theme.PANEL,
-                   theme.BORDER, theme.MUTED, align="r")
+            r = self._pill(img, text, WIDTH - 24, 38 + HEADER_DROP, "Paused", theme.PANEL, theme.BORDER,
+                           theme.MUTED, dot=theme.MUTED, align="r")
+        self._pill(img, text, r.x - 10, 38 + HEADER_DROP, view.camera_label, theme.PANEL, theme.BORDER,
+                   theme.TEXT, dot=theme.GREEN if view.frame is not None else theme.MUTED,
+                   align="r")
 
     def camera_fit(self, frame):
         fh, fw = frame.shape[:2]
@@ -234,28 +288,41 @@ class UI:
             nh = CAMERA.h
         return (CAMERA.w - nw) // 2, (CAMERA.h - nh) // 2, nw, nh
 
-    def _draw_camera(self, img, text, view):
+    def _draw_empty_cat(self, img, now):
+        """The cat sitting in the camera area while there is no picture."""
+        if self._cat is None:
+            self._cat = (CatSprite(S(CAT_HEIGHT_EMPTY)), CatFace())
+        sprite, face = self._cat
+        face.update(now, [], None, True)
+        ax, ay = sprite.anchor
+        blend_bgra_premultiplied(img, sprite.render_bgra(face),
+                                 int(S(CAMERA.cx) - ax), int(S(CAMERA.cy + 56) - ay))
+
+    def _draw_camera(self, img, text, view, now):
+        cam = region(img, CAMERA)
+        r = corner_size(self._camera_mask)
+        behind = save_corners(cam, r)       # what the rounded corners must show
+        cam[:] = CAMERA_LETTERBOX
         if view.frame is None:
-            block = np.full((CAMERA.h, CAMERA.w, 3), CAMERA_LETTERBOX, np.uint8)
-            paste(img, block, CAMERA.x, CAMERA.y, self._camera_mask)
-            text.add("No camera picture", (CAMERA.cx, CAMERA.cy - 16), 24, theme.WHITE, True, "mm")
-            text.add("Press C or click Swap camera to try another one",
-                     (CAMERA.cx, CAMERA.cy + 18), 16, theme.GREEN_SOFT, False, "mm")
+            round_corners(cam, self._camera_mask, r, behind)
+            self._draw_empty_cat(img, now)
+            text.add("No camera picture", (CAMERA.cx, CAMERA.cy + 96), 24, theme.TEXT, True, "mm")
+            text.add("Press C or click Camera to try again",
+                     (CAMERA.cx, CAMERA.cy + 128), 16, theme.MUTED, False, "mm")
             return
 
         ox, oy, nw, nh = self.camera_fit(view.frame)
-        block = np.full((CAMERA.h, CAMERA.w, 3), CAMERA_LETTERBOX, np.uint8)
-        interp = cv2.INTER_AREA if nw < view.frame.shape[1] else cv2.INTER_LINEAR
-        block[oy:oy + nh, ox:ox + nw] = cv2.resize(view.frame, (nw, nh), interpolation=interp)
-        paste(img, block, CAMERA.x, CAMERA.y, self._camera_mask)
+        sx, sy, sw, sh = S(ox), S(oy), S(nw), S(nh)
+        interp = cv2.INTER_AREA if sw < view.frame.shape[1] else cv2.INTER_LINEAR
+        pic = cv2.resize(view.frame, (sw, sh), interpolation=interp)
+        fit = cam[sy:sy + sh, sx:sx + sw]
+        fit[:] = pic[:fit.shape[0], :fit.shape[1]]
 
         if not view.awake:
             blend_rect(img, CAMERA, theme.BG, 0.55)
 
         if view.hand is not None:
-            # draw in camera-local coordinates on a view of the camera area, so
-            # points outside the frame (MediaPipe allows that) are clipped
-            cam = img[CAMERA.y:CAMERA.bottom, CAMERA.x:CAMERA.right]
+            # points outside the frame (MediaPipe allows that) are clipped by the slice
             pts = [(ox + x * nw, oy + y * nh) for x, y in view.hand]
             self._draw_hand(cam, pts, dim=not view.awake)
             if view.holding:
@@ -264,11 +331,7 @@ class UI:
                 cy = sum(p[1] for p in palm) / 5
                 size = np.hypot(pts[0][0] - pts[9][0], pts[0][1] - pts[9][1])
                 ring(cam, (cx, cy), max(40, min(110, size * 1.1)), view.holding[1])
-            # restore the rounded corners the skeleton may have painted over
-            corner = (self._camera_mask < 0.999)[..., 0]
-            cam[corner] = (cam[corner] * self._camera_mask[corner] +
-                           np.array(theme.BG, np.float32) * (1 - self._camera_mask[corner])
-                           ).astype(np.uint8)
+        round_corners(cam, self._camera_mask, r, behind)   # round the corners last
 
         if not view.awake:
             banner = Rect(CAMERA.cx - 210, CAMERA.y + 18, 420, 68)
@@ -278,35 +341,34 @@ class UI:
                      (banner.cx, banner.y + 48), 15, theme.MUTED, False, "mm")
 
     def _draw_hand(self, img, pts, dim=False):
-        line = theme.GREEN_SOFT if dim else theme.YELLOW
+        color = theme.GREEN_SOFT if dim else theme.YELLOW
         for a, b in HAND_CONNECTIONS:
-            cv2.line(img, ipt(pts[a]), ipt(pts[b]), theme.GREEN_DARK, 6, cv2.LINE_AA)
-            cv2.line(img, ipt(pts[a]), ipt(pts[b]), line, 3, cv2.LINE_AA)
+            draw_line(img, pts[a], pts[b], theme.GREEN_DARK, 6)
+            draw_line(img, pts[a], pts[b], color, 3)
         for p in pts:
-            cv2.circle(img, ipt(p), 6, theme.GREEN_DARK, -1, cv2.LINE_AA)
-            cv2.circle(img, ipt(p), 4, theme.WHITE, -1, cv2.LINE_AA)
+            circle(img, p, 6, theme.GREEN_DARK, -1)
+            circle(img, p, 4, theme.WHITE, -1)
 
     def _draw_status(self, img, text, view):
-        x, y = STATUS.x + 28, STATUS.y
-        text.add("RIGHT NOW", (x, y + 26), 13, theme.MUTED, True, "lm")
+        x, y = STATUS.x + 28, STATUS.y - STATUS_RISE
         if view.confirmed in GESTURE_NAMES:
             title = GESTURE_NAMES[view.confirmed]
         elif view.hand is not None:
             title = "Hand found"
         else:
             title = "No hand in view"
-        text.add(title, (x, y + 64), 30, theme.TEXT, True, "lm")
+        text.add(title, (x, y + 54), 30, theme.TEXT, True, "lm")
 
         if self._flash:
-            self._pill(img, text, x, y + 108, self._flash[0], theme.YELLOW, None, theme.TEXT, 16)
+            self._pill(img, text, x, y + 98, self._flash[0], theme.YELLOW, None, theme.TEXT, 16)
         elif not view.awake:
-            self._pill(img, text, x, y + 108, "Paused", theme.YELLOW_SOFT, theme.YELLOW,
+            self._pill(img, text, x, y + 98, "Paused", theme.YELLOW_SOFT, theme.YELLOW,
                        theme.YELLOW_DARK, 16)
         elif view.scroll_mode:
-            self._pill(img, text, x, y + 108, f"Scrolling {view.scroll_mode}", theme.GREEN,
+            self._pill(img, text, x, y + 98, f"Scrolling {view.scroll_mode}", theme.GREEN,
                        None, theme.WHITE, 16)
         else:
-            self._pill(img, text, x, y + 108, "Ready", theme.GREEN_SOFT, None,
+            self._pill(img, text, x, y + 98, "Ready", theme.GREEN_SOFT, None,
                        theme.GREEN_DARK, 16)
 
         if view.holding:
@@ -314,86 +376,28 @@ class UI:
                 msg = "Keep holding to " + ("hide" if view.menu_visible else "show") + " the menu"
             else:
                 msg = "Keep holding to pause tracking" if view.awake else "Keep holding to wake up"
-            text.add(msg, (x, y + 146), 15, theme.MUTED, False, "lm")
-            progress_bar(img, Rect(x, y + 160, STATUS.w - 56, 10), view.holding[1])
+            text.add(msg, (x, y + 136), 15, theme.MUTED, False, "lm")
+            progress_bar(img, Rect(x, y + 150, STATUS.w - 56, 10), view.holding[1])
         else:
             tip = ("Click your browser window, then point up/down to scroll, left/right for tabs."
                    if view.awake else "Gestures are ignored until you wake tracking.")
-            text.add(tip, (x, y + 152), 15, theme.MUTED, False, "lm")
-        if view.fps:
-            text.add(f"{view.fps:.0f} fps", (STATUS.right - 24, y + 26), 13, theme.MUTED,
-                     False, "rm")
-
-    def _draw_tour(self, img, text, view, now):
-        """Tour card in place of the status card. Returns False if no tour."""
-        tour = view.tour
-        if tour is None or not (tour.step is not None or tour.celebrating(now)):
-            return False
-        x, y = STATUS.x, STATUS.y
-        icon = Rect(x + 20, y + 20, 142, 142)
-        rounded_rect(img, icon, 18, theme.PANEL_ALT)
-        tx = icon.right + 22
-        wrap_w = STATUS.right - tx - 24
-
-        if tour.done:
-            check_mark(img, (icon.cx, icon.cy), 44)
-            text.add("QUICK TOUR · COMPLETE", (tx, y + 30), 13, theme.MUTED, True, "lm")
-            self._pill(img, text, STATUS.right - 20, y + 30, "Live", theme.GREEN, None,
-                       theme.WHITE, 13, align="r")
-            title = "You're all set!"
-            body = "Gestures now control your browser. Click your browser window and try it."
-        elif tour.between_steps(now):
-            check_mark(img, (icon.cx, icon.cy), 44)
-            text.add(f"QUICK TOUR · STEP {tour.index} OF {tour.total}", (tx, y + 30), 13,
-                     theme.MUTED, True, "lm")
-            title = "Nice!"
-            nxt = tour.text_for(tour.step.title, view.menu_visible, view.awake)
-            body = f"Next: {nxt}"
-        else:
-            step = tour.step
-            box = img[icon.y:icon.bottom, icon.x:icon.right]  # clip the demo motion
-            if step.icon:
-                draw_gesture_icon(box, (icon.w / 2, icon.h / 2), 118, step.icon, now)
-            else:
-                draw_hand_icon(box, (icon.w / 2, icon.h / 2 + 8), 100,
-                               {"thumb", "index", "middle", "ring", "pinky"})
-            text.add(f"QUICK TOUR · STEP {tour.index + 1} OF {tour.total}", (tx, y + 30), 13,
-                     theme.MUTED, True, "lm")
-            self._pill(img, text, STATUS.right - 20, y + 30, "Practice mode", theme.YELLOW_SOFT,
-                       theme.YELLOW, theme.YELLOW_DARK, 13, align="r")
-            title = tour.text_for(step.title, view.menu_visible, view.awake)
-            body = tour.text_for(step.instruction, view.menu_visible, view.awake)
-            if step.kind in ("hand", "scroll"):
-                progress_bar(img, Rect(tx, y + 132, min(320, wrap_w), 10), tour.progress)
-
-        text.add(title, (tx, y + 64), 24, theme.TEXT, True, "lm")
-        for i, line in enumerate(wrap_text(body, 15, wrap_w)[:2]):
-            text.add(line, (tx, y + 96 + i * 20), 15, theme.MUTED, False, "lm")
-
-        # progress dots
-        for i in range(tour.total):
-            c = (tx + 6 + i * 20, y + 158)
-            if i < tour.index:
-                color = theme.GREEN
-            elif i == tour.index and not tour.done:
-                color = theme.YELLOW
-            else:
-                color = theme.BORDER
-            cv2.circle(img, c, 6, color, -1, cv2.LINE_AA)
-        return True
+            text.add(tip, (x, y + 142), 15, theme.MUTED, False, "lm")
 
     def _draw_buttons(self, img, text):
         mx, my = self.mouse
         for b in self.buttons:
             hover = b.rect.contains(mx, my)
-            fill = theme.YELLOW_SOFT if hover else theme.PANEL
+            fill = theme.YELLOW if hover else theme.PANEL
             border = theme.YELLOW if hover else theme.BORDER
             rounded_rect(img, b.rect, 22, fill)
             rounded_rect(img, b.rect, 22, border, 1)
-            text.add(b.label, (b.rect.x + 18, b.rect.cy), 15, theme.TEXT, True, "lm")
-            badge = Rect(b.rect.right - 38, b.rect.cy - 12, 24, 24)
-            rounded_rect(img, badge, 7, theme.GREEN_SOFT)
-            text.add(b.key, (badge.cx, badge.cy), 13, theme.GREEN_DARK, True, "mm")
+            # label and key badge centred together, so equal-width buttons stay balanced
+            lw = TextLayer.measure(b.label, 15, True)[0]
+            left = b.rect.cx - (lw + 10 + 24) / 2
+            text.add(b.label, (left, b.rect.cy), 15, theme.TEXT, True, "lm")
+            badge = Rect(int(left + lw + 10), b.rect.cy - 12, 24, 24)
+            rounded_rect(img, badge, 7, theme.WHITE if hover else theme.PANEL_ALT)
+            text.add(b.key, (badge.cx, badge.cy), 13, theme.GREEN, True, "mm")
 
     def _draw_toast(self, img, text, label):
         self._pill(img, text, CAMERA.cx, CAMERA.y + 30, label, theme.GREEN_DARK, None,

@@ -11,3 +11,4 @@ models/*.task
 .venv-build/
 packaging/*.icns
 packaging/*.iconset/
+.venv/

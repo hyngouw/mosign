@@ -1,12 +1,28 @@
 """Little hand drawings that show each gesture (used by the menu and the tour)."""
 
 import math
+from functools import lru_cache
+from pathlib import Path
 
 import cv2
 import numpy as np
 
 from mosign import theme
-from mosign.draw import AA, ipt
+from mosign.draw import AA, S, blend_rgba, ipt
+
+HAND_DIR = Path(__file__).resolve().parent / "assets" / "hands"
+
+# gesture label -> (sprite file, flip left-right, rotate 180). The illustrations
+# are drawn once (pointing up / pointing right) and turned for the other gestures.
+SPRITES = {
+    "scroll_up": ("up", False, False),
+    "scroll_down": ("up", False, True),
+    "prev_tab": ("right", True, False),
+    "next_tab": ("right", False, False),
+    "toggle_tracking": ("horns", False, False),
+    "toggle_menu": ("pinky", False, False),
+    "palm": ("palm", False, False),
+}
 
 # Local hand shape: palm length = 1, y grows down, fingers point up (-y).
 _PALM = [(-0.42, 0.05), (0.42, 0.05), (0.46, -0.82), (-0.46, -0.82)]
@@ -74,6 +90,39 @@ def draw_hand_icon(img, center, size, fingers, rotation=0.0,
             cv2.line(img, ipt(tx(a)), ipt(tx(b)), color, width, AA)
 
 
+@lru_cache(maxsize=64)
+def hand_sprite(label, longest):
+    """The illustrated hand for a gesture as straight-alpha BGRA, `longest` px on
+    its longer side. Every hand is scaled the same way, so they all look the same size."""
+    name, flip, rot = SPRITES[label]
+    img = cv2.imread(str(HAND_DIR / f"{name}.png"), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        return None
+    if flip:
+        img = cv2.flip(img, 1)
+    if rot:
+        img = cv2.rotate(img, cv2.ROTATE_180)
+    h, w = img.shape[:2]
+    k = longest / max(h, w)
+    size = (max(1, round(w * k)), max(1, round(h * k)))
+    # premultiplied resize avoids dark fringes around the outline
+    a = img[..., 3:4].astype(np.float32) / 255.0
+    pre = np.dstack([img[..., :3].astype(np.float32) * a, a * 255.0])
+    pre = cv2.resize(pre, size, interpolation=cv2.INTER_AREA)
+    alpha = pre[..., 3:4]
+    rgb = np.where(alpha > 0, pre[..., :3] / np.maximum(alpha, 1e-6) * 255.0, 0)
+    return np.dstack([rgb, alpha]).clip(0, 255).astype(np.uint8)
+
+
+def draw_hand_sprite(img, center, longest, label):
+    sprite = hand_sprite(label, max(8, S(longest)))
+    if sprite is None:
+        return False
+    h, w = sprite.shape[:2]
+    blend_rgba(img, sprite, int(round(S(center[0]) - w / 2)), int(round(S(center[1]) - h / 2)))
+    return True
+
+
 def draw_arrow(img, start, end, color=theme.GREEN_DARK, thickness=3):
     cv2.arrowedLine(img, ipt(start), ipt(end), color, thickness, AA, tipLength=0.35)
 
@@ -86,7 +135,8 @@ def draw_gesture_icon(img, center, size, label, t=0.0, animate=True):
         nudge = math.sin(t * 5.0) * 0.06 * size
         cx += arrow[0] * nudge
         cy += arrow[1] * nudge
-    draw_hand_icon(img, (cx, cy), size * 0.82, fingers, rotation)
+    if not draw_hand_sprite(img, (cx, cy), size * 0.8, label):
+        draw_hand_icon(img, (cx, cy), size * 0.82, fingers, rotation)
     if held:
         r = max(5, int(size * 0.14))
         c = (int(center[0] + size * 0.36), int(center[1] + size * 0.34))
@@ -94,3 +144,9 @@ def draw_gesture_icon(img, center, size, label, t=0.0, animate=True):
         cv2.circle(img, c, r, theme.BORDER, 2, AA)
         sweep = (t % 1.6) / 1.2 if animate else 1.0
         cv2.ellipse(img, c, (r, r), -90, 0, 360 * min(1.0, sweep), theme.YELLOW, max(2, r // 3), AA)
+
+
+def draw_palm_icon(img, center, size):
+    """An open hand (the tour's "show your hand" step)."""
+    if not draw_hand_sprite(img, center, size * 0.8, "palm"):
+        draw_hand_icon(img, center, size, {"thumb", "index", "middle", "ring", "pinky"})

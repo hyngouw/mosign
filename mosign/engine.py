@@ -5,6 +5,7 @@ then draw the main window image and the overlay image. qt_app.py shows those
 images; the tests drive Engine directly with a fake camera and fake hands.
 """
 
+import os
 from dataclasses import dataclass
 
 import cv2
@@ -12,10 +13,12 @@ import cv2
 from mosign.actions import PyAutoGuiActions, RecordingActions
 from mosign.camera import Camera
 from mosign.cat import CatFace, CatMotion, CatSprite
+from mosign import flow as flows
 from mosign.controller import Controller
 from mosign.gestures import classify_landmarks
-from mosign.onboarding import Onboarding
+from mosign.onboarding import LAND_PAUSE, STEP_PAUSE, Onboarding
 from mosign.overlay import Overlay
+from mosign.sound import Chime
 from mosign.tabs import TabLocator
 from mosign.tracker import HandTracker, to_gesture_space
 from mosign.ui import UI, View
@@ -46,6 +49,7 @@ class Output:
     cat_feet: tuple = (0.0, 0.0)    # where the cat's feet are, in screen points
     cat_anchor: tuple = (0.0, 0.0)  # where the feet are inside `cat`, in screen points
     quit: bool = False
+    show_overlay: bool = True   # False while the welcome / tutorial screens are up
 
 
 class FpsCounter:
@@ -63,7 +67,7 @@ class FpsCounter:
 
 class Engine:
     def __init__(self, cfg, overlay_scale=1.0, start_tour=False, tracker=None, actions=None,
-                 tabs=None, home=(0.0, 0.0)):
+                 tabs=None, home=(0.0, 0.0), welcome_back=False, sound=None):
         """Raises if hand tracking can't start (the caller shows a message)."""
         self.cfg = cfg
         self.tracker = tracker or HandTracker()
@@ -77,7 +81,7 @@ class Engine:
             hold_seconds=cfg.hold_seconds,
             menu_visible=cfg.menu_visible,
         )
-        self.ui = UI()
+        self.ui = UI(scale=overlay_scale)
         self.overlay = Overlay(overlay_scale)
         self.cat_face = CatFace()
         self.cat_sprite = CatSprite(CAT_HEIGHT * overlay_scale)
@@ -86,11 +90,21 @@ class Engine:
         self.tabs = tabs if tabs is not None else TabLocator(query=None)
         self._predicted = None   # (index, until) after a tab switch
         self.fps = FpsCounter()
+        self.sound = sound if sound is not None else \
+            Chime(enabled=cfg.sounds and not os.environ.get("MOSIGN_MUTE"))
         self.tour = None
         self.tour_required = False
+        self.flow = None
         self._last_now = None
-        if start_tour or not cfg.onboarding_complete:
-            self.start_tour(required=not cfg.onboarding_complete)
+        if not cfg.onboarding_complete:
+            # first run: welcome -> camera -> tutorial -> ready
+            self.start_tour(required=True)
+            self.flow = flows.Flow(flows.WELCOME)
+        elif start_tour:
+            self.start_tour()
+            self.flow = flows.Flow(flows.TUTORIAL)
+        elif welcome_back:
+            self.flow = flows.Flow(flows.BACK, name=cfg.user_name)
 
     # ---------- tour ----------
     def start_tour(self, required=False):
@@ -98,13 +112,23 @@ class Engine:
         self.tour = Onboarding()
         self.tour_required = required
         self.controller.actions = RecordingActions()
+        # the tutorial has its own timed hold; keep rock horns / pinky from toggling underneath it
+        self.controller.tracking_hold.seconds = self.controller.menu_hold.seconds = 1e9
         self.controller.set_awake(True)
         if not self.controller.menu_visible:
             self.controller.toggle_menu()
 
     def end_tour(self):
+        self.controller.tracking_hold.seconds = self.controller.menu_hold.seconds = \
+            self.cfg.hold_seconds
+        self.controller.tracking_hold.update(False, 0)   # a gesture still held from the
+        self.controller.menu_hold.update(False, 0)       # tutorial starts a fresh count
         self.controller.actions = self.real_actions
         self.tour_required = False
+        if not self.controller.menu_visible:
+            self.controller.toggle_menu()   # the tutorial may have hidden it
+        if not self.controller.awake:
+            self.controller.set_awake(True)
 
     # ---------- one frame ----------
     def step(self, now, commands=()):
@@ -120,24 +144,37 @@ class Engine:
         controller.update(raw, now)
         events = list(controller.events)
 
+        flow = self.flow
         tour = self.tour
-        if tour is not None and not tour.done:
+        in_tutorial = flow is None or flow.stage == flows.TUTORIAL
+        if tour is not None and not tour.done and in_tutorial:
             dt = 0.0 if self._last_now is None else min(0.1, now - self._last_now)
-            result = tour.update(now, dt, hand_present=norm is not None,
-                                 scroll_mode=controller.scroll_mode, events=events)
-            if result == "step":
+            result = tour.update(now, dt, gesture=controller.confirmed,
+                                 hand_present=norm is not None)
+            if result in ("step", "done"):
+                self.sound.play()
                 controller.last_tab_time = float("-inf")  # no cooldown between steps
-            elif result == "done":
+            if result == "done":
                 self.end_tour()
                 cfg.onboarding_complete = True
                 cfg.save()
                 events.append("celebrate")
-        if tour is not None and tour.done and not tour.celebrating(now):
-            self.tour = None
+        if tour is not None and tour.done:
+            if flow is not None and flow.stage == flows.TUTORIAL \
+                    and now - tour.finished_at >= STEP_PAUSE + LAND_PAUSE:
+                flow.go(flows.READY, now)       # let the last hand land in its slot first
+            if flow is None and not tour.celebrating(now):
+                self.tour = None
         self._last_now = now
+        if flow is not None:
+            flow.update(now)
+            if flow.finished:
+                self._finish_flow()
 
         commands = list(commands) + self.ui.pop_commands()
-        quit_now = "quit" in commands
+        quit_now = "quit" in commands or (
+            "flow_close" in commands and self.flow is not None
+            and self.flow.stage in (flows.WELCOME, flows.CAMERA))
         for cmd in commands:
             before = len(controller.events)
             self._run_command(cmd, now)
@@ -160,6 +197,7 @@ class Engine:
             menu_visible=controller.menu_visible,
             tour=self.tour,
             tour_required=self.tour_required,
+            flow=self.flow,
         )
         self.overlay.update(view, now)
         self._move_cat(events, now)
@@ -174,6 +212,7 @@ class Engine:
             cat_feet=(motion.x, motion.y),
             cat_anchor=(ax / self.overlay.scale, ay / self.overlay.scale),
             quit=quit_now,
+            show_overlay=self.flow is None or self.flow.stage == flows.BACK,
         )
 
     # ---------- the cat ----------
@@ -229,8 +268,50 @@ class Engine:
         self.cat_motion.go(*target, now)
         self.cat_motion.update(now)
 
+    def _finish_flow(self):
+        self.flow = None
+        if self.tour is not None and self.tour.done:
+            self.tour = None
+
+    def _flow_command(self, cmd, now):
+        """Clicks and keys on the onboarding screens. True if it was one."""
+        flow = self.flow
+        if cmd == "flow_next":
+            self._advance_flow(now)
+        elif cmd == "flow_close":
+            if flow.stage in (flows.TUTORIAL, flows.READY, flows.BACK):
+                if flow.stage == flows.TUTORIAL:
+                    self._skip_tutorial()
+                flow.finished = True
+                self._finish_flow()
+        else:
+            return False
+        return True
+
+    def _advance_flow(self, now):
+        self.flow.advance(now)
+        self._after_advance(now)
+        if self.flow.finished:
+            self._finish_flow()
+
+    def _after_advance(self, now):
+        if self.flow is not None and self.flow.stage == flows.TUTORIAL:
+            self.start_tour(required=not self.cfg.onboarding_complete)
+
+    def _skip_tutorial(self):
+        self.end_tour()
+        self.tour = None
+        self.cfg.onboarding_complete = True
+        self.cfg.save()
+
     def _run_command(self, cmd, now):
         controller = self.controller
+        if self.flow is not None:
+            if self._flow_command(cmd, now):
+                return
+            allowed = {"swap_camera": (flows.CAMERA,), "tour": (flows.TUTORIAL,)}
+            if self.flow.stage not in allowed.get(cmd, ()):
+                return   # shortcuts are off on these screens 
         if cmd == "swap_camera":
             if self.camera.next_camera():
                 controller.reset()
@@ -248,9 +329,11 @@ class Engine:
                 if not self.tour_required:
                     self.end_tour()
                     self.tour = None
+                    self.flow = None
                     self.ui.toast("Tour ended", now)
             else:
                 self.start_tour()
+                self.flow = flows.Flow(flows.TUTORIAL, now=now)
 
     def close(self):
         self.tracker.close()

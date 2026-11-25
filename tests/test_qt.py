@@ -122,3 +122,12 @@ def test_mac_window_tweaks_skipped_without_a_real_mac_window(qt_fakes, monkeypat
     monkeypatch.setattr(qt_app.macos, "configure_overlay", lambda *a, **k: calls.append(1))
     app.main(["--max-frames", "3"])
     assert QGuiApplication.platformName() == "offscreen" and calls == []
+
+
+def test_window_asks_for_a_sharp_picture_size():
+    qt_app.get_app()
+    win = qt_app.CanvasWindow()
+    assert 2.0 <= win.pixel_scale() <= 2.5
+    win.resize(win.canvas_size[0] * 2, win.canvas_size[1] * 2)    # a big window: capped
+    assert win.pixel_scale() == 2.5
+    win.close()

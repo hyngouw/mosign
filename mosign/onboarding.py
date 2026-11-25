@@ -1,59 +1,52 @@
-"""First-run tour: try every control once before gestures go live.
+"""The tutorial: try every control once before gestures go live.
 
-While the tour runs the app is in practice mode: gestures are recognised,
-Pip reacts and the menu works, but nothing is sent to the browser. Each step
-finishes when you actually do the gesture, so by the end you have used
-every control at least once.
+While it runs the app is in practice mode: gestures are recognised but nothing
+is sent to the browser. Every step is the same: hold the gesture for a moment
+while a progress bar fills, so by the end you have done every control.
 """
 
 from dataclasses import dataclass
 
 from mosign.gestures import NEXT_TAB, PREV_TAB, SCROLL_DOWN, SCROLL_UP, TOGGLE_MENU, TOGGLE_TRACKING
 
-STEP_PAUSE = 0.9          # seconds of "Nice!" between steps (input ignored)
+HOLD_SECONDS = 0.8        # every gesture is held this long to pass its step
+FLASH_SECONDS = 0.45      # the gesture pulses and glows when you pass
+FLY_DELAY = 0.5           # then, after this long...
+FLY_SECONDS = 0.65        # ...the hand flies into its slot in the tray
+STEP_PAUSE = FLY_DELAY + FLY_SECONDS   # input is ignored while this plays
+LAND_PAUSE = 0.7          # after the last hand lands, its slot stays in view this long
 CELEBRATE_SECONDS = 3.0   # how long the "You're all set" card stays up
 
 
 @dataclass(frozen=True)
 class Step:
     key: str
-    title: str
-    instruction: str
-    icon: str = None          # gesture label for the picture, or None
-    kind: str = "event"       # "hand", "scroll" or "event"
-    target: tuple = ()        # scroll direction, or events that complete the step
-    seconds: float = 0.0      # for "hand" and "scroll": how long to keep it up
+    title: str                # heading while you try it ("Point up")
+    instruction: str          # one line of help
+    icon: str = None          # gesture label for the picture
+    kind: str = "hold"        # "hold": keep the gesture up for `seconds`; "hand": any hand
+    seconds: float = HOLD_SECONDS
+    name: str = ""            # what the gesture does ("Scroll up")
+    caption: str = ""         # small print under the name
+    tray: str = ""            # short label in the "learned" tray
 
 
 STEPS = [
-    Step("hand", "Show your hand",
-         "Hold one hand up in front of the camera, palm facing it.",
-         kind="hand", seconds=0.6),
-    Step("scroll_up", "Point up to scroll up",
-         "Point your index finger up and keep it there. Lower it to stop.",
-         SCROLL_UP, "scroll", ("up",), 0.8),
-    Step("scroll_down", "Point down to scroll down",
-         "Turn your hand so your index finger points down. Lower it to stop.",
-         SCROLL_DOWN, "scroll", ("down",), 0.8),
-    Step("prev_tab", "Point left for the previous tab",
-         "Point your index finger to your left.",
-         PREV_TAB, target=("prev_tab",)),
-    Step("next_tab", "Point right for the next tab",
-         "Point your index finger to your right.",
-         NEXT_TAB, target=("next_tab",)),
-    Step("menu", "Hold your pinky up",
-         "Hold up only your pinky for 1 second to {menu_action} the gesture menu "
-         "in the top-right corner of your screen.",
-         TOGGLE_MENU, target=("menu_on", "menu_off")),
-    Step("menu_again", "Again, to {menu_action} it",
-         "Hold your pinky up once more to {menu_action} the menu.",
-         TOGGLE_MENU, target=("menu_on", "menu_off")),
-    Step("pause", "Hold rock horns to {tracking_action}",
-         "Index and pinky up, other fingers down. Hold it for 1 second.",
-         TOGGLE_TRACKING, target=("sleep", "wake")),
-    Step("resume", "Rock horns again to {tracking_action}",
-         "This is how you turn gestures off and on without touching the laptop.",
-         TOGGLE_TRACKING, target=("sleep", "wake")),
+    Step("scroll_up", "Point up", "Point your index finger up and keep it there.",
+         SCROLL_UP, name="Scroll up", caption="Continues while you hold it", tray="Scroll up"),
+    Step("scroll_down", "Point down", "Turn your hand so your index finger points down.",
+         SCROLL_DOWN, name="Scroll down", caption="Continues while you hold it",
+         tray="Scroll down"),
+    Step("prev_tab", "Point left", "Point your index finger to your left.",
+         PREV_TAB, name="Previous tab", caption="Moves one tab per gesture", tray="Previous tab"),
+    Step("next_tab", "Point right", "Point your index finger to your right.",
+         NEXT_TAB, name="Next tab", caption="Moves one tab per gesture", tray="Next tab"),
+    Step("pause", "Rock horns", "Index and pinky up, other fingers down.",
+         TOGGLE_TRACKING, name="Turn tracking off or on", caption="Hold 1 second in everyday use",
+         tray="Tracking off/on"),
+    Step("menu", "Pinky up", "Hold up only your pinky.",
+         TOGGLE_MENU, name="Hide or show the gesture guide", caption="Hold 1 second in everyday use",
+         tray="Show/hide guide"),
 ]
 
 
@@ -78,6 +71,20 @@ class Onboarding:
         return self.done and self.finished_at is not None and \
             now - self.finished_at < CELEBRATE_SECONDS
 
+    def since_pass(self, now):
+        """Seconds since the last gesture was passed (while its animation plays), else None."""
+        if self.done and self.finished_at is not None:
+            return now - self.finished_at
+        if self._paused_until is not None and now < self._paused_until:
+            return now - (self._paused_until - STEP_PAUSE)
+        return None
+
+    def filled(self, now):
+        """How many tray slots are full: a slot fills when the flying hand lands in it."""
+        t = self.since_pass(now)
+        n = self.index - (1 if t is not None and t < STEP_PAUSE else 0)
+        return max(0, n)
+
     def between_steps(self, now):
         return self._paused_until is not None and now < self._paused_until
 
@@ -87,9 +94,11 @@ class Onboarding:
             tracking_action="pause" if awake else "wake up",
         )
 
-    def update(self, now, dt, hand_present=False, scroll_mode=None, events=()):
-        """Advance the tour. Returns "step" when a step was finished,
-        "done" when the whole tour was finished, otherwise None."""
+    def update(self, now, dt, gesture=None, hand_present=False):
+        """Advance the tutorial by one frame. `gesture` is the steady gesture label the
+        camera sees. Every step works the same way: keep the right gesture up until the
+        bar fills; the bar drains if you drop it. Returns "step" when a step was
+        finished, "done" when the whole tutorial was, otherwise None."""
         if self.done:
             return None
         if self._paused_until is not None:
@@ -98,20 +107,14 @@ class Onboarding:
             self._paused_until = None
 
         step = self.steps[self.index]
-        complete = False
-        if step.kind == "hand":
-            self.progress = min(1.0, self.progress + dt / step.seconds) if hand_present \
-                else max(0.0, self.progress - dt / step.seconds)
-            complete = self.progress >= 1.0
-        elif step.kind == "scroll":
-            if scroll_mode in step.target:
-                self.progress = min(1.0, self.progress + dt / step.seconds)
-            complete = self.progress >= 1.0
+        holding = hand_present if step.kind == "hand" else gesture == step.icon
+        if holding:
+            self.progress = min(1.0, self.progress + dt / step.seconds)
         else:
-            complete = any(e in step.target for e in events)
-
-        if not complete:
+            self.progress = max(0.0, self.progress - 2 * dt / step.seconds)
+        if self.progress < 1.0:
             return None
+
         self.index += 1
         self.progress = 0.0
         if self.index >= len(self.steps):

@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 def isolated_home(tmp_path, monkeypatch):
     """Never touch the real ~/.mosign during tests."""
     monkeypatch.setenv("MOSIGN_HOME", str(tmp_path / "mosign_home"))
+    monkeypatch.setenv("MOSIGN_MUTE", "1")     # no chimes while testing
     yield tmp_path / "mosign_home"
 
 

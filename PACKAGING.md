@@ -23,7 +23,7 @@ The script:
 1. makes a clean build environment (`.venv-build`) and installs everything
 2. runs the tests (it stops if any fail)
 3. downloads the MediaPipe hand model into `models/` so it gets bundled
-4. draws the app icon (Pip on a green tile)
+4. draws the app icon (the cat face on a yellow tile)
 5. builds `dist/Mosign.app`
 6. runs the built app's `--self-test`, which checks MediaPipe, the window and the hand model with no camera needed
 7. wraps it in `dist/Mosign-<version>-<arch>.dmg` with a drag-to-Applications shortcut

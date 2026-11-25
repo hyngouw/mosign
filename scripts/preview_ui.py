@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
 from handgen import make_hand  # noqa: E402
+from mosign import flow as flows  # noqa: E402
 from mosign.onboarding import Onboarding  # noqa: E402
 from mosign.cat import CatFace, CatSprite  # noqa: E402
 from mosign.engine import CAT_HEIGHT  # noqa: E402
@@ -47,10 +48,36 @@ def tour_at(index, progress=0.0, between=False, done=False, now=0.0):
     tour.index = index
     tour.progress = progress
     if between:
-        tour._paused_until = now + 10
+        tour._paused_until = now + 1e9
     if done:
         tour.index, tour.done, tour.finished_at = tour.total, True, now
     return tour
+
+
+def flow_at(stage, now=100.0, **kw):
+    f = flows.Flow(stage, now=now)
+    for k, v in kw.items():
+        setattr(f, k, v)
+    return f
+
+
+def onboarding_scenes():
+    """The welcome, camera, tutorial and ready screens (these fill the whole window)."""
+    frame = fake_frame()
+    yield "10_welcome", View(flow=flow_at(flows.WELCOME))
+    yield "12_camera", View(flow=flow_at(flows.CAMERA), frame=frame,
+                            hand=norm_hand({"thumb", "index", "middle", "ring", "pinky"}))
+    yield "12b_camera_blocked", View(flow=flow_at(flows.CAMERA))
+    yield "13_tutorial_up", View(flow=flow_at(flows.TUTORIAL), frame=frame, tour=tour_at(0, 0.5),
+                                 hand=norm_hand({"index"}), scroll_mode="up", confirmed="scroll_up")
+    yield "13b_tutorial_correct", View(flow=flow_at(flows.TUTORIAL), frame=frame,
+                                       tour=tour_at(2, between=True, now=130),
+                                       hand=norm_hand({"index"}, 90))
+    yield "13c_tutorial_hold", View(flow=flow_at(flows.TUTORIAL), frame=frame, tour=tour_at(5),
+                                    hand=norm_hand({"pinky"}), holding=("toggle_menu", 0.55),
+                                    confirmed="toggle_menu")
+    yield "14_ready", View(flow=flow_at(flows.READY))
+    yield "15_welcome_back", View(flow=flow_at(flows.BACK, name="Alex"))
 
 
 def scenes():
@@ -104,8 +131,8 @@ def main(out=None, scale=2.0):
     out = Path(out or ROOT / "build" / "preview")
     out.mkdir(parents=True, exist_ok=True)
     paths = []
-    for i, (name, view) in enumerate(scenes()):
-        ui, overlay = UI(), Overlay(scale)
+    for i, (name, view) in enumerate(list(scenes()) + list(onboarding_scenes())):
+        ui, overlay = UI(scale), Overlay(scale)
         t = 100.0 + i * 10
         # play a few frames so Pip is caught mid-move
         for k in range(12):
@@ -113,6 +140,8 @@ def main(out=None, scale=2.0):
             ui.render(view, now=t + k / 30)
             view.events = []
         now = t + 12 / 30
+        if view.flow is not None:
+            view.flow.since = now - (1.2 if view.flow.stage == flows.BACK else 0)
         img = ui.render(view, now=now)
         path = out / f"{name}.png"
         cv2.imwrite(str(path), img)

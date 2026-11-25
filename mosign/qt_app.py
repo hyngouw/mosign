@@ -9,18 +9,25 @@ receiving the scroll / tab keys.
 import os
 import sys
 import time
+from pathlib import Path
+
+import cv2
 
 # opencv-python on Linux points Qt at its own (incompatible) plugins; undo that.
 os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
 
 from PySide6.QtCore import QPoint, QRect, Qt, QTimer  # noqa: E402
-from PySide6.QtGui import QGuiApplication, QImage, QPainter  # noqa: E402
+from PySide6.QtGui import QGuiApplication, QIcon, QImage, QKeySequence, QPainter  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from mosign import macos, overlay as overlay_mod  # noqa: E402
 from mosign.engine import KEY_COMMANDS  # noqa: E402
+from mosign.framing import fit_picture  # noqa: E402
 from mosign.tabs import TabLocator  # noqa: E402
 from mosign.ui import HEIGHT, WIDTH, WINDOW_TITLE  # noqa: E402
+
+
+APP_ICON = Path(__file__).resolve().parent / "assets" / "app_icon.png"
 
 
 def bgr_to_qimage(img):
@@ -38,6 +45,8 @@ def bgra_to_qimage(img):
 def get_app():
     app = QApplication.instance() or QApplication(sys.argv[:1])
     app.setApplicationName("Mosign")
+    if APP_ICON.is_file():
+        app.setWindowIcon(QIcon(str(APP_ICON)))   # window and Dock icon: the cat
     app.setQuitOnLastWindowClosed(False)  # the overlay alone shouldn't keep it alive
     return app
 
@@ -59,8 +68,11 @@ class CanvasWindow(QWidget):
         self.closed = False
         self.on_click = None    # callable(x, y) in canvas pixels
         self.on_hover = None
+        self.on_key = None      # callable(text, name) -> True if the key was typed into a field
         self.setMouseTracking(True)
-        self.setMinimumSize(size[0] // 3, size[1] // 3)
+        self.padded = False     # the picture already fills the whole window (see set_frame)
+        self.static_frame = None   # a fixed picture to keep re-fitting on resize (error window)
+        self.setMinimumSize(size[0] // 2, size[1] // 2)
         self.resize(*self._initial_size())
 
     def _initial_size(self):
@@ -79,22 +91,52 @@ class CanvasWindow(QWidget):
         tw, th = int(w * k), int(h * k)
         return QRect((self.width() - tw) // 2, (self.height() - th) // 2, tw, th), k
 
+    def pixel_scale(self):
+        """How many real screen pixels the window uses per logical pixel of the picture,
+        rounded to the nearest quarter and kept between 2 and 2.5. Drawing at that size lines
+        the picture up with the screen's pixels, so text and edges stay sharp (a picture
+        drawn on a 1x display and then squeezed or stretched looks soft); 2 at least gives
+        smooth, anti-aliased edges on plain screens."""
+        _, k = self._target()
+        return max(2.0, min(2.5, round(k * self.devicePixelRatioF() * 4) / 4))
+
     def to_canvas(self, pos):
         rect, k = self._target()
         return (pos.x() - rect.x()) / k, (pos.y() - rect.y()) / k
 
     def set_image(self, qimage):
         self.image = qimage
+        self.padded = False
+        self.update()
+
+    def set_frame(self, img):
+        """Show a picture so that it fills the whole window, whatever its size or shape:
+        the picture keeps its proportions in the middle and its edge colours continue out
+        to the sides, so resizing never shows bars. Drawn pixel for pixel, so it stays sharp."""
+        dpr = self.devicePixelRatioF()
+        w, h = self.canvas_size
+        img, _ = fit_picture(img, round(self.width() * dpr), round(self.height() * dpr), w / h)
+        qimage = bgr_to_qimage(img)
+        qimage.setDevicePixelRatio(dpr)
+        self.image = qimage
+        self.padded = True
         self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.fillRect(self.rect(), Qt.GlobalColor.white)
-        if self.image is not None:
+        if self.image is not None and self.padded:
+            p.drawImage(0, 0, self.image)       # already the size of the window
+        elif self.image is not None:
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             rect, _ = self._target()
             p.drawImage(rect, self.image)
         p.end()
+
+    def resizeEvent(self, event):
+        if self.static_frame is not None:
+            self.set_frame(self.static_frame)
+        super().resizeEvent(event)
 
     def mouseMoveEvent(self, event):
         if self.on_hover:
@@ -105,6 +147,15 @@ class CanvasWindow(QWidget):
             self.on_click(*self.to_canvas(event.position()))
 
     def keyPressEvent(self, event):
+        if self.on_key:
+            names = {Qt.Key.Key_Backspace: "backspace", Qt.Key.Key_Tab: "tab",
+                     Qt.Key.Key_Return: "enter", Qt.Key.Key_Enter: "enter"}
+            text = event.text()
+            if event.matches(QKeySequence.StandardKey.Paste):
+                text = QApplication.clipboard().text().strip().splitlines()[0:1] and \
+                    QApplication.clipboard().text().strip().splitlines()[0] or ""
+            if self.on_key(text, names.get(event.key(), "")):
+                return
         cmd = KEY_COMMANDS.get(event.text().lower())
         if cmd:
             self.commands.append(cmd)
@@ -203,8 +254,9 @@ def show_message(img, max_frames=None):
     """A window with a fixed image (e.g. a start-up error). Q or close quits."""
     app = get_app()
     win = CanvasWindow()
-    win.set_image(bgr_to_qimage(img))
     win.show()
+    win.set_frame(img)
+    win.static_frame = img      # redrawn to fill the window whenever it is resized
     frames = 0
 
     def tick():
@@ -234,6 +286,7 @@ def run(make_engine, max_frames=None, clock=time.time, hide_dock_icon=False):
     main.activity = macos.keep_app_awake()  # stops App Nap slowing us down; keep a reference
     main.on_click = lambda x, y: engine.ui.click(x, y)
     main.on_hover = lambda x, y: engine.ui.hover(x, y)
+    main.on_key = lambda text, name: engine.ui.key(text, name)
     overlay = OverlayWindow()
     overlay.hide_dock_icon = hide_dock_icon
     cat = CatWindow()
@@ -252,11 +305,16 @@ def run(make_engine, max_frames=None, clock=time.time, hide_dock_icon=False):
     def tick():
         nonlocal frames
         commands, main.commands = main.commands, []
+        engine.ui.set_scale(main.pixel_scale())     # follow window size / screen changes
         out = engine.step(clock(), commands)
         if main.isVisible():
-            main.set_image(bgr_to_qimage(out.main))
-        overlay.set_image(bgra_to_qimage(out.overlay), engine.overlay.scale)
-        if out.cat is not None:
+            main.set_frame(out.main)
+        if not out.show_overlay:
+            overlay.hide()      # welcome / tutorial screens: just the window
+            cat.hide()
+        else:
+            overlay.set_image(bgra_to_qimage(out.overlay), engine.overlay.scale)
+        if out.show_overlay and out.cat is not None:
             cat.set_frame(bgra_to_qimage(out.cat), engine.overlay.scale, out.cat_feet,
                           out.cat_anchor)
         frames += 1
