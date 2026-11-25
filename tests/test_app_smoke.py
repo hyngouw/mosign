@@ -104,7 +104,7 @@ def test_s_pauses_tracking(make):
     engine, rec = make(make_hand({"index"}))
     run(engine, 30, {0: ["toggle_tracking"]})
     assert rec.calls == []
-    assert engine.overlay.penguin.asleep
+    assert engine.cat_face.asleep
 
 
 def test_c_swaps_camera_and_remembers_it(make):
@@ -133,7 +133,7 @@ def test_m_hides_overlay_menu_and_remembers_it(make):
     hidden = run(engine, 2, {0: ["toggle_menu"]}, t0=1).overlay
     assert hidden.shape[0] < shown.shape[0]     # overlay shrinks to just Pip
     assert Config.load().menu_visible is False
-    assert engine.overlay.penguin.waving        # Pip reacts to the key too
+    assert engine.overlay._flash[0] == "Menu hidden"   # status pill says so
     run(engine, 2, {0: ["toggle_menu"]}, t0=2)
     assert Config.load().menu_visible is True
 
@@ -202,3 +202,110 @@ def test_tour_forces_overlay_menu_on(make):
     engine.controller.toggle_menu()
     out = run(engine, 2, {0: ["tour"]})
     assert out.menu_visible
+
+
+class FakeTabs:
+    """Pretends to be the browser: 4 tabs in a row; switches when told."""
+
+    def __init__(self, active=1, lag=0):
+        from mosign.tabs import TabInfo
+        self.info = TabInfo([(100 + i * 200, 30, 190, 34) for i in range(4)], active, stamp=0)
+        self.available = True
+        self.pokes = 0
+
+    def clock(self):
+        return 0
+
+    def latest(self):
+        return self.info
+
+    def poke(self):
+        self.pokes += 1
+
+    def start(self):
+        return self
+
+    def stop(self):
+        pass
+
+
+def settle(engine, frames, t0, hand=None):
+    if hand is not None:
+        engine.tracker.hand = hand
+    return run(engine, frames, t0=t0)
+
+
+def test_cat_sits_on_the_active_tab(make):
+    engine, _ = make()
+    engine.tabs = FakeTabs(active=2)
+    engine.set_home(1300, 100)
+    out = settle(engine, 60, 0)
+    assert out.cat_feet == pytest.approx(Engine.perch((500, 30, 190, 34)))
+    assert out.cat.shape[2] == 4 and out.cat[..., 3].max() == 255
+
+
+def test_cat_jumps_to_the_next_tab_right_away(make):
+    engine, _ = make()
+    tabs = FakeTabs(active=1)
+    engine.tabs = tabs
+    settle(engine, 60, 0)
+    start = engine.cat_motion.x
+    # point right: the browser hasn't reported the new tab yet (lag)
+    out = settle(engine, 25, 2.0, hand=make_hand({"index"}, rotation=-90))
+    assert tabs.pokes >= 1
+    assert out.cat_feet[0] == pytest.approx(Engine.perch((500, 30, 190, 34))[0])
+    assert out.cat_feet[0] > start
+    tabs.info.active = 2            # browser catches up: cat stays put
+    out = settle(engine, 60, 3.0, hand=None)
+    assert out.cat_feet[0] == pytest.approx(Engine.perch((500, 30, 190, 34))[0])
+
+
+def test_cat_returns_if_the_browser_never_switches(make):
+    """If the switch didn't happen (e.g. the browser ignored the key), the cat
+    goes back to the tab the browser says is active."""
+    engine, _ = make()
+    engine.tabs = FakeTabs(active=1)
+    settle(engine, 30, 0)
+    out = settle(engine, 90, 2.0, hand=make_hand({"index"}, rotation=-90))
+    assert out.cat_feet[0] == pytest.approx(Engine.perch((300, 30, 190, 34))[0])
+
+
+def test_cat_wraps_from_last_tab_to_first(make):
+    engine, _ = make()
+    engine.tabs = FakeTabs(active=3)
+    settle(engine, 30, 0)
+    out = settle(engine, 25, 2.0, hand=make_hand({"index"}, rotation=-90))
+    assert out.cat_feet[0] == pytest.approx(Engine.perch((100, 30, 190, 34))[0])
+
+
+def test_without_tabs_cat_stays_home_and_hops(make):
+    engine, _ = make()
+    engine.set_home(1300, 100)
+    settle(engine, 5, 0)
+    assert engine.cat_motion.target == (1300, 100)
+    engine.tracker.hand = make_hand({"index"}, rotation=90)    # point left
+    xs = []
+    for i in range(40):
+        out = engine.step(1 + i / 30)
+        xs.append(out.cat_feet[0])
+    assert min(xs) < 1300 - 5                 # hopped left...
+    assert xs[-1] == pytest.approx(1300)      # ...and came back
+
+
+def test_cat_sleeps_when_paused(make):
+    engine, _ = make()
+    run(engine, 10, {0: ["toggle_tracking"]})
+    assert engine.cat_face.asleep and engine.cat_face.eyes == "closed"
+    run(engine, 10, {0: ["toggle_tracking"]}, t0=2)
+    assert not engine.cat_face.asleep
+
+
+def test_cat_goes_home_when_tabs_disappear(make):
+    engine, _ = make()
+    tabs = FakeTabs(active=0)
+    engine.tabs = tabs
+    engine.set_home(1300, 100)
+    settle(engine, 60, 0)
+    tabs.info = None                # e.g. switched to a non-browser app
+    out = settle(engine, 90, 3)
+    assert out.cat_feet == pytest.approx((1300, 100))

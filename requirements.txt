@@ -15,3 +15,5 @@ opencv-python
 pyautogui
 Pillow>=10.1
 PySide6-Essentials   # windows + the on-screen overlay
+# macOS: read where the browser's tabs are (so the cat can sit on the active one)
+pyobjc-framework-ApplicationServices; sys_platform == "darwin"

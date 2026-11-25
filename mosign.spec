@@ -18,6 +18,7 @@ ROOT = Path(SPECPATH)
 mp_datas, mp_binaries, mp_hidden = collect_all("mediapipe")
 
 datas = list(mp_datas)
+datas.append((str(ROOT / "mosign" / "assets"), "mosign/assets"))   # the cat
 model = ROOT / "models" / "hand_landmarker.task"
 if model.is_file():
     # newer MediaPipe needs this file; bundling it means no download on first run
@@ -39,7 +40,8 @@ a = Analysis(
     binaries=mp_binaries,
     datas=datas,
     hiddenimports=mp_hidden + ["pyautogui", "PIL.ImageFont", "PySide6.QtWidgets"]
-    + (["objc", "AppKit", "Foundation"] if sys.platform == "darwin" else []),
+    + (["objc", "AppKit", "Foundation", "ApplicationServices", "HIServices"]
+       if sys.platform == "darwin" else []),
     excludes=["pytest", "IPython", "tkinter"],
     noarchive=False,
 )

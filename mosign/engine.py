@@ -11,10 +11,12 @@ import cv2
 
 from mosign.actions import PyAutoGuiActions, RecordingActions
 from mosign.camera import Camera
+from mosign.cat import CatFace, CatMotion, CatSprite
 from mosign.controller import Controller
 from mosign.gestures import classify_landmarks
 from mosign.onboarding import Onboarding
 from mosign.overlay import Overlay
+from mosign.tabs import TabLocator
 from mosign.tracker import HandTracker, to_gesture_space
 from mosign.ui import UI, View
 
@@ -28,11 +30,21 @@ KEY_COMMANDS = {
 }
 
 
+CAT_HEIGHT = 54          # logical pixels; a bit taller than a browser tab
+CLOSE_BUTTON_ROOM = 28   # keep clear of the tab's close button
+FEET_INSET = 3           # feet this far above the tab's bottom edge
+PREDICT_SECONDS = 1.0    # after a switch, trust our guess over a lagging browser
+STALE_SECONDS = 3.0      # tab positions older than this are ignored
+
+
 @dataclass
 class Output:
     main: object          # BGR image for the main window
-    overlay: object       # BGRA premultiplied image for the overlay
+    overlay: object       # BGRA premultiplied image for the corner overlay
     menu_visible: bool
+    cat: object = None    # BGRA premultiplied image of the cat
+    cat_feet: tuple = (0.0, 0.0)    # where the cat's feet are, in screen points
+    cat_anchor: tuple = (0.0, 0.0)  # where the feet are inside `cat`, in screen points
     quit: bool = False
 
 
@@ -50,7 +62,8 @@ class FpsCounter:
 
 
 class Engine:
-    def __init__(self, cfg, overlay_scale=1.0, start_tour=False, tracker=None, actions=None):
+    def __init__(self, cfg, overlay_scale=1.0, start_tour=False, tracker=None, actions=None,
+                 tabs=None, home=(0.0, 0.0)):
         """Raises if hand tracking can't start (the caller shows a message)."""
         self.cfg = cfg
         self.tracker = tracker or HandTracker()
@@ -66,6 +79,12 @@ class Engine:
         )
         self.ui = UI()
         self.overlay = Overlay(overlay_scale)
+        self.cat_face = CatFace()
+        self.cat_sprite = CatSprite(CAT_HEIGHT * overlay_scale)
+        self.cat_motion = CatMotion(*home)
+        self.home = tuple(home)
+        self.tabs = tabs if tabs is not None else TabLocator(query=None)
+        self._predicted = None   # (index, until) after a tab switch
         self.fps = FpsCounter()
         self.tour = None
         self.tour_required = False
@@ -143,12 +162,72 @@ class Engine:
             tour_required=self.tour_required,
         )
         self.overlay.update(view, now)
+        self._move_cat(events, now)
+        self.cat_face.update(now, events, view.scroll_mode, view.awake)
+        motion = self.cat_motion
+        ax, ay = self.cat_sprite.anchor
         return Output(
             main=self.ui.render(view, now),
             overlay=self.overlay.render(view, now),
             menu_visible=view.menu_visible,
+            cat=self.cat_sprite.render_bgra(self.cat_face, motion.squash, motion.lean),
+            cat_feet=(motion.x, motion.y),
+            cat_anchor=(ax / self.overlay.scale, ay / self.overlay.scale),
             quit=quit_now,
         )
+
+    # ---------- the cat ----------
+    def set_home(self, x, y):
+        """Where the cat sits when it isn't on a tab (set by the window code)."""
+        first = self.home == (0.0, 0.0)
+        self.home = (float(x), float(y))
+        if first:
+            self.cat_motion.place(x, y)
+
+    def _tab_info(self, now):
+        info = self.tabs.latest() if self.tabs is not None else None
+        if info is None or (info.stamp and self.tabs.clock() - info.stamp > STALE_SECONDS):
+            return None
+        return info
+
+    @staticmethod
+    def perch(rect):
+        """Where the cat sits on a tab: on its right side, next to the close
+        button, standing on the tab's bottom edge. (Sitting on top of the tab
+        doesn't work: in a maximised window the tabs touch the top of the screen.)"""
+        x, y, w, h = rect
+        half = CAT_HEIGHT * 0.5
+        if w >= 2 * half + CLOSE_BUTTON_ROOM + 40:     # room left for the title
+            cx = x + w - CLOSE_BUTTON_ROOM - half
+        else:
+            cx = x + w / 2                              # narrow tabs: centre
+        return cx, y + h - FEET_INSET
+
+    def _move_cat(self, events, now):
+        info = self._tab_info(now)
+        for event in events:
+            if event in ("next_tab", "prev_tab"):
+                direction = 1 if event == "next_tab" else -1
+                self.tabs.poke()
+                if info is not None and info.active >= 0:
+                    # jump right away to where the tab will be; the browser
+                    # takes a moment to report the new one
+                    index = info.neighbour(direction)
+                    self._predicted = (index, now + PREDICT_SECONDS)
+                else:
+                    self.cat_motion.hop(direction, now)
+
+        target = self.home
+        if info is not None and info.tabs:
+            index = info.active
+            if self._predicted and now < self._predicted[1] and 0 <= self._predicted[0] < len(info.tabs):
+                index = self._predicted[0]
+                if info.active == index:
+                    self._predicted = None    # the browser caught up
+            if 0 <= index < len(info.tabs):
+                target = self.perch(info.tabs[index])
+        self.cat_motion.go(*target, now)
+        self.cat_motion.update(now)
 
     def _run_command(self, cmd, now):
         controller = self.controller
@@ -176,3 +255,5 @@ class Engine:
     def close(self):
         self.tracker.close()
         self.camera.release()
+        if self.tabs is not None:
+            self.tabs.stop()

@@ -1,4 +1,6 @@
-"""The on-screen overlay: Pip and the gesture menu, top-right of your screen.
+"""The corner overlay, top-right of your screen: the gesture menu, a status
+pill, and the spot where the cat sits when it isn't on a browser tab (the
+cat itself has its own little window, see cat.py and qt_app.py).
 
 This is drawn into a BGRA image with real transparency, so it can float over
 the browser in a frameless, click-through window (see qt_app.py).
@@ -23,11 +25,12 @@ from mosign.gestures import (
     TOGGLE_TRACKING,
 )
 from mosign.icons import draw_gesture_icon
-from mosign.penguin import Penguin
 
 # Sizes in logical pixels (multiplied by `scale`, e.g. 2 on Retina screens)
 WIDTH = 248
-PIP_HEIGHT = 204
+HOME_HEIGHT = 140   # top part: the cat's home spot + the status pill
+STATUS_Y = 122      # centre of the status pill
+HOME_FEET_Y = 100   # where the cat's feet go when it's home
 MENU_GAP = 4
 MENU_HEADER = 44
 ROW_HEIGHT = 50
@@ -51,17 +54,37 @@ MENU_HEIGHT = MENU_HEADER + len(MENU_ROWS) * ROW_HEIGHT + MENU_PAD
 
 def logical_size(menu_visible):
     """(width, height) of the overlay in logical pixels."""
-    h = PIP_HEIGHT
+    h = HOME_HEIGHT
     if menu_visible:
         h += MENU_GAP + MENU_HEIGHT + BOTTOM
     return WIDTH, h
 
 
+# short status shown after a gesture
+EVENT_TEXT = {
+    "scroll_up": "Scrolling up",
+    "scroll_down": "Scrolling down",
+    "prev_tab": "Previous tab",
+    "next_tab": "Next tab",
+    "sleep": "Tracking paused",
+    "wake": "Tracking on",
+    "menu_on": "Menu shown",
+    "menu_off": "Menu hidden",
+    "celebrate": "You're all set!",
+}
+FLASH_SECONDS = 1.2
+
+
+def home_feet(corner_x, corner_y):
+    """Screen point for the cat's feet at home, given the overlay's top-left."""
+    return corner_x + WIDTH / 2, corner_y + HOME_FEET_Y
+
+
 class Overlay:
     def __init__(self, scale=1.0):
         self.scale = float(scale)
-        self.penguin = Penguin(max_x=34, max_y=38)
         self._shadow_cache = {}
+        self._flash = None   # (text, until)
 
     def size(self, menu_visible):
         """(width, height) in real pixels."""
@@ -69,8 +92,12 @@ class Overlay:
         return int(round(w * self.scale)), int(round(h * self.scale))
 
     def update(self, view, now):
-        """Advance Pip. Call once per frame, before render()."""
-        self.penguin.update(now, view.events, view.scroll_mode, view.awake)
+        """Call once per frame, before render()."""
+        for event in view.events:
+            if event in EVENT_TEXT:
+                self._flash = (EVENT_TEXT[event], now + FLASH_SECONDS)
+        if self._flash and now > self._flash[1]:
+            self._flash = None
 
     def render(self, view, now):
         """BGRA image, premultiplied alpha (what Qt's ARGB32_Premultiplied wants)."""
@@ -90,12 +117,12 @@ class Overlay:
         return int(round(v * self.scale))
 
     def _menu_card(self):
-        return self._r(SIDE, PIP_HEIGHT + MENU_GAP, WIDTH - 2 * SIDE, MENU_HEIGHT)
+        return self._r(SIDE, HOME_HEIGHT + MENU_GAP, WIDTH - 2 * SIDE, MENU_HEIGHT)
 
     def _draw(self, view, now, background):
         img = self._base(view.menu_visible, background)
         text = TextLayer()
-        self._draw_pip(img, text, view)
+        self._draw_status(img, text, view)
         if view.menu_visible:
             self._draw_menu(img, text, view, now)
         text.flush(img)
@@ -125,41 +152,26 @@ class Overlay:
         text.add(label, (rect.cx, rect.cy), fs, color, True, "mm")
         return rect
 
-    def _draw_pip(self, img, text, view):
+    def _draw_status(self, img, text, view):
+        """Hold progress, "paused", or what just happened. Nothing when idle."""
         s = self.scale
-        stage = self._r(0, 0, WIDTH, PIP_HEIGHT - 34)
-        roi = img[stage.y:stage.bottom, stage.x:stage.right]   # keep Pip inside its area
-        feet = (stage.w / 2, stage.h - 16 * s)
-        pip_scale = 0.6 * s
-        self.penguin.draw_motion_hints(roi, feet, pip_scale)
-        self.penguin.draw(roi, feet, pip_scale)
-        for z, (zx, zy), size in self.penguin.zzz(feet, pip_scale):
-            text.add(z, (stage.x + zx, stage.y + zy), max(8, size), theme.MUTED, True, "mm")
-
-        cy = (PIP_HEIGHT - 24) * s
+        cx, cy = WIDTH * s / 2, STATUS_Y * s
         if view.holding:
             label, progress = view.holding
             if label == TOGGLE_MENU:
                 msg = "Keep holding: " + ("hide menu" if view.menu_visible else "show menu")
             else:
                 msg = "Keep holding: " + ("pause" if view.awake else "wake up")
-            pill = self._pill(img, text, WIDTH * s / 2, cy, msg, theme.YELLOW_SOFT,
+            pill = self._pill(img, text, cx, cy - 3 * s, msg, theme.YELLOW_SOFT,
                               theme.TEXT, 12, theme.YELLOW)
-            bar = Rect(pill.x + self._px(12), pill.bottom + self._px(4),
+            bar = Rect(pill.x + self._px(12), pill.bottom + self._px(3),
                        pill.w - self._px(24), self._px(5))
             progress_bar(img, bar, progress)
-        else:
-            mood = self.penguin.mood
-            if not view.awake:
-                fill, border = theme.YELLOW_SOFT, theme.YELLOW
-            elif mood != "idle":
-                fill, border = theme.YELLOW, None
-            else:
-                fill, border = theme.PANEL, theme.BORDER
-            caption = self.penguin.caption
-            if not view.awake:
-                caption = "Paused · hold rock horns"
-            self._pill(img, text, WIDTH * s / 2, cy, caption, fill, theme.TEXT, 12, border)
+        elif not view.awake:
+            self._pill(img, text, cx, cy, "Paused · hold rock horns", theme.YELLOW_SOFT,
+                       theme.TEXT, 12, theme.YELLOW)
+        elif self._flash:
+            self._pill(img, text, cx, cy, self._flash[0], theme.YELLOW, theme.TEXT, 12)
 
     def _draw_menu(self, img, text, view, now):
         s = self.scale
@@ -173,7 +185,7 @@ class Overlay:
 
         step = view.tour.step if view.tour is not None else None
         for i, (label, title, action) in enumerate(MENU_ROWS):
-            row = self._r(SIDE + 8, PIP_HEIGHT + MENU_GAP + MENU_HEADER + i * ROW_HEIGHT,
+            row = self._r(SIDE + 8, HOME_HEIGHT + MENU_GAP + MENU_HEADER + i * ROW_HEIGHT,
                           WIDTH - 2 * SIDE - 16, ROW_HEIGHT - 6)
             active = view.confirmed == label and (
                 view.awake or label in (TOGGLE_TRACKING, TOGGLE_MENU))

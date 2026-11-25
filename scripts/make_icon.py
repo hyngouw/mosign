@@ -1,4 +1,4 @@
-"""Draw the app icon (Pip on a green tile) as a 1024x1024 PNG, plus a Windows .ico.
+"""Draw the app icon (the cat on a green tile) as a 1024x1024 PNG, plus a Windows .ico.
 
     python scripts/make_icon.py [output_folder]
 """
@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 
 from mosign import theme  # noqa: E402
 from mosign.draw import Rect, rounded_rect  # noqa: E402
-from mosign.penguin import Penguin  # noqa: E402
+from mosign.cat import CatFace, CatSprite  # noqa: E402
 
 SIZE = 1024
 
@@ -30,9 +30,15 @@ def render_icon(size=SIZE):
     rounded_rect(rgb, tile, int(big * 0.18), theme.GREEN_SOFT)
     cv2.circle(rgb, (tile.right - int(big * 0.17), tile.y + int(big * 0.17)), int(big * 0.07),
                theme.YELLOW, -1, cv2.LINE_AA)
-    pip = Penguin()
-    pip.update(0.0)
-    pip.draw(rgb, (big / 2, tile.bottom - big * 0.17), scale=big / 300)
+    sprite = CatSprite(int(tile.h * 0.78))
+    cat = sprite.render_cat(CatFace())                       # RGBA, cat only
+    cat_np = np.asarray(cat).astype(np.float32)
+    x0 = big // 2 - cat.width // 2
+    y0 = tile.bottom - int(big * 0.05) - cat.height
+    a = cat_np[..., 3:4] / 255
+    roi = rgb[y0:y0 + cat.height, x0:x0 + cat.width].astype(np.float32)
+    rgb[y0:y0 + cat.height, x0:x0 + cat.width] = (
+        cat_np[..., 2::-1] * a + roi * (1 - a)).astype(np.uint8)
     bgra = np.dstack([rgb, alpha])
     small = cv2.resize(bgra, (size, size), interpolation=cv2.INTER_AREA)
     rgba = cv2.cvtColor(small, cv2.COLOR_BGRA2RGBA)

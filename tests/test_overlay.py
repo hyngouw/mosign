@@ -50,11 +50,11 @@ def test_same_picture_on_any_background():
     assert over_black[clear].max() == 0 and over_white[clear].min() == 255
 
 
-def test_hidden_menu_leaves_only_pip():
+def test_hidden_menu_and_idle_leaves_nothing_on_screen():
     _, shown = rendered(View(menu_visible=True))
     _, hidden = rendered(View(menu_visible=False))
     assert hidden.shape[0] < shown.shape[0] / 2
-    assert hidden[..., 3].max() == 255   # Pip still drawn
+    assert hidden[..., 3].max() == 0       # nothing drawn: the cat has its own window
 
 
 def test_menu_highlights_current_gesture_and_tour_target():
@@ -67,15 +67,17 @@ def test_menu_highlights_current_gesture_and_tour_target():
     assert not np.array_equal(plain, target)
 
 
-def test_pip_moves_with_gestures():
+def test_status_pill_flashes_after_a_gesture_then_goes():
     o = Overlay()
-    _, still = rendered(View(), o=o)
-    o.update(View(events=["next_tab"]), 1.0)
-    for k in range(5):
-        o.update(View(), 1.0 + (k + 1) / 30)
-    assert o.penguin.x > 10 and o.penguin.mood == "right"
-    moved = o.render(View(), 1.2)
-    assert not np.array_equal(still, moved)
+    o.update(View(events=["next_tab"], menu_visible=False), 1.0)
+    assert o.render(View(menu_visible=False), 1.0)[..., 3].max() == 255
+    o.update(View(menu_visible=False), 3.0)
+    assert o.render(View(menu_visible=False), 3.0)[..., 3].max() == 0
+
+
+def test_home_spot_is_centred_above_the_menu():
+    x, y = ov.home_feet(100, 20)
+    assert x == 100 + ov.WIDTH / 2 and 20 < y < 20 + ov.HOME_HEIGHT
 
 
 def test_hold_and_pause_captions_render():

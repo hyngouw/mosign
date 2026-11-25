@@ -57,7 +57,10 @@ def self_test():
         assert img.shape == (HEIGHT, WIDTH, 3)
         over = Overlay(2).render(View(), now=0.0)
         assert over.shape[2] == 4 and over[..., 3].max() == 255 and over[..., 3].min() == 0
-        print("  ok   window and overlay render")
+        from mosign.cat import CatFace, CatSprite
+        cat = CatSprite(108).render_bgra(CatFace())
+        assert cat[..., 3].max() == 255
+        print("  ok   window, overlay and cat render")
     except Exception as exc:
         print(f"  FAIL render: {exc}")
         ok = False

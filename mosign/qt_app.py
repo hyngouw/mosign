@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from mosign import macos, overlay as overlay_mod  # noqa: E402
 from mosign.engine import KEY_COMMANDS  # noqa: E402
+from mosign.tabs import TabLocator  # noqa: E402
 from mosign.ui import HEIGHT, WIDTH, WINDOW_TITLE  # noqa: E402
 
 
@@ -133,7 +134,8 @@ class OverlayWindow(QWidget):
         self._configured = False
         self.hide_dock_icon = False
 
-    def corner_position(self, w, h):
+    @staticmethod
+    def corner_position(w, h=0):
         screen = QGuiApplication.primaryScreen()
         avail = screen.availableGeometry() if screen else QRect(0, 0, 1280, 800)
         m = overlay_mod.MARGIN
@@ -149,16 +151,20 @@ class OverlayWindow(QWidget):
         self.image = qimage
         if not self.isVisible():
             self.show()
-        if not self._configured:
-            self._configured = True
-            # Only real macOS windows have an NSWindow behind them (not the
-            # "offscreen" platform used by tests and CI): never poke a fake one.
-            if QGuiApplication.platformName() == "cocoa":
-                # stay on top across apps and Spaces, including full-screen apps
-                macos.configure_overlay(
-                    self, schedule=lambda ms, fn: QTimer.singleShot(ms, fn),
-                    hide_dock_icon=self.hide_dock_icon)
+        self._configure_once()
         self.update()
+
+    def _configure_once(self):
+        if self._configured:
+            return
+        self._configured = True
+        # Only real macOS windows have an NSWindow behind them (not the
+        # "offscreen" platform used by tests and CI): never poke a fake one.
+        if QGuiApplication.platformName() == "cocoa":
+            # stay on top across apps and Spaces, including full-screen apps
+            macos.configure_overlay(
+                self, schedule=lambda ms, fn: QTimer.singleShot(ms, fn),
+                hide_dock_icon=self.hide_dock_icon)
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -167,6 +173,30 @@ class OverlayWindow(QWidget):
         if self.image is not None:
             p.drawImage(0, 0, self.image)
         p.end()
+
+
+class CatWindow(OverlayWindow):
+    """The cat's own little window. It moves every frame to wherever the cat is,
+    so the cat can jump across the screen to the browser tab you're on."""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Mosign cat")
+
+    def set_frame(self, qimage, dpr, feet, anchor):
+        qimage.setDevicePixelRatio(dpr)
+        w = round(qimage.width() / dpr)
+        h = round(qimage.height() / dpr)
+        if (w, h) != (self.width(), self.height()):
+            self.resize(w, h)
+        pos = QPoint(round(feet[0] - anchor[0]), round(feet[1] - anchor[1]))
+        if pos != self.pos():
+            self.move(pos)
+        self.image = qimage
+        if not self.isVisible():
+            self.show()
+        self._configure_once()
+        self.update()
 
 
 def show_message(img, max_frames=None):
@@ -206,6 +236,15 @@ def run(make_engine, max_frames=None, clock=time.time, hide_dock_icon=False):
     main.on_hover = lambda x, y: engine.ui.hover(x, y)
     overlay = OverlayWindow()
     overlay.hide_dock_icon = hide_dock_icon
+    cat = CatWindow()
+    cat.hide_dock_icon = hide_dock_icon
+
+    # the cat's home is the top of the corner overlay; it finds browser tabs itself
+    corner = OverlayWindow.corner_position(overlay_mod.WIDTH)
+    engine.set_home(*overlay_mod.home_feet(corner.x(), corner.y()))
+    if engine.tabs is None or not engine.tabs.available:
+        engine.tabs = TabLocator()
+    engine.tabs.start()
     main.show()
 
     frames = 0
@@ -217,10 +256,14 @@ def run(make_engine, max_frames=None, clock=time.time, hide_dock_icon=False):
         if main.isVisible():
             main.set_image(bgr_to_qimage(out.main))
         overlay.set_image(bgra_to_qimage(out.overlay), engine.overlay.scale)
+        if out.cat is not None:
+            cat.set_frame(bgra_to_qimage(out.cat), engine.overlay.scale, out.cat_feet,
+                          out.cat_anchor)
         frames += 1
         if out.quit or main.closed or (max_frames and frames >= max_frames):
             timer.stop()
             overlay.close()
+            cat.close()
             if not main.closed:
                 main.close()
             app.quit()

@@ -20,7 +20,9 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 from handgen import make_hand  # noqa: E402
 from mosign.onboarding import Onboarding  # noqa: E402
-from mosign.overlay import Overlay  # noqa: E402
+from mosign.cat import CatFace, CatSprite  # noqa: E402
+from mosign.engine import CAT_HEIGHT  # noqa: E402
+from mosign.overlay import Overlay, home_feet  # noqa: E402
 from mosign.ui import UI, View  # noqa: E402
 
 
@@ -119,7 +121,15 @@ def main(out=None, scale=2.0):
         over = overlay.render(view, now)
         margin = int(12 * scale)
         screen = fake_browser(1440, max(900, over.shape[0] + 3 * margin))
-        composite(screen, over, screen.shape[1] - over.shape[1] - margin, margin)
+        ox = screen.shape[1] - over.shape[1] - margin
+        composite(screen, over, ox, margin)
+        # the cat at its home spot (when no browser tab is found)
+        sprite, face = CatSprite(CAT_HEIGHT * scale), CatFace()
+        for k in range(10):
+            face.update(t + k / 30, view.events, view.scroll_mode, view.awake)
+        fx, fy = home_feet(ox / scale, margin / scale)
+        ax, ay = sprite.anchor
+        composite(screen, sprite.render_bgra(face), int(fx * scale - ax), int(fy * scale - ay))
         path = out / f"{name}_screen.png"
         cv2.imwrite(str(path), screen)
         paths.append(path)

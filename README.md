@@ -35,7 +35,7 @@ While tracking is off, only the rock-horns gesture is watched for, so you can re
 
 The first time you open Mosign it walks you through every control: show your hand, point up, down, left and right, hide and show the menu, then pause and resume tracking. Each step only finishes when you actually do the gesture, so by the end you've used every control at least once.
 
-During the tour the app is in **practice mode**: gestures are recognised and Pip reacts, but nothing is sent to your browser. When you finish, gestures go live and the tour won't appear again. Replay it any time with `O` or **Tour**.
+During the tour the app is in **practice mode**: gestures are recognised and the cat reacts, but nothing is sent to your browser. When you finish, gestures go live and the tour won't appear again. Replay it any time with `O` or **Tour**.
 
 If your camera can't see you and you need to get past the tour, start the app with `--skip-tour`.
 
@@ -43,7 +43,8 @@ If your camera can't see you and you need to get past the tour, start the app wi
 
 Mosign has two parts:
 
-- **The on-screen overlay**, in the top-right corner of your screen and floating above every other app, including your browser. It holds **Pip the penguin**, who copies what you do: hops up while you scroll up, slides down while you scroll down, waddles left or right when you switch tabs, waves when you toggle the menu, and naps while tracking is paused. Below Pip is the **Gestures** menu, which shows every gesture with a small animated hand and lights up the one you're doing. Hold your pinky up for 1 second to hide or show the menu (Pip stays). Clicks go straight through the overlay, and it never takes focus away from your browser. It also shows over full-screen apps; if it doesn't on your Mac, start Mosign once with `--hide-dock-icon` (remembered; `--show-dock-icon` undoes it).
+- **The cat**, a little calico that lives on your screen above every app. When you switch tabs it **jumps onto the tab you moved to**: point right and it leaps onto the next tab, point left and it leaps back. It sits on the right side of the active tab, next to the close button. While you scroll it looks up or down. Pause tracking and it **falls asleep** (eyes closed, floating Z's); wake it and it opens its eyes wide. On macOS it finds the tabs through the Accessibility permission Mosign already needs, and works with Chrome, Safari, Edge, Brave and Firefox. When it can't see any tabs (Windows, a full-screen browser with the tab bar hidden, or another app in front), it sits in the top-right corner and hops left or right in place.
+- **The gesture menu**, in the top-right corner below the cat's spot. It shows every gesture with a small animated hand and lights up the one you're doing; a small status pill shows what just happened, hold progress, or "Paused". Hold your pinky up for 1 second to hide or show the menu. Clicks go straight through the cat and the menu, and neither takes focus away from your browser. Both also show over full-screen apps; if they don't on your Mac, start Mosign once with `--hide-dock-icon` (remembered; `--show-dock-icon` undoes it).
 - **The Mosign window**, a light-green window that shows your camera with your hand's skeleton drawn on top, plus a "Right now" card that says which gesture it sees. This is also where the quick tour runs. You can move it out of the way or minimise it; closing it quits Mosign.
 
 | Key / button (in the Mosign window) | Action |
@@ -127,5 +128,9 @@ python scripts/preview_ui.py        # render the window to build/preview/*.png
 python -m mosign --self-test        # check the install
 ```
 
-Code layout: `mosign/gestures.py` (gesture rules), `controller.py` (gestures to actions), `onboarding.py` (tour), `engine.py` (one frame: camera to actions to pictures), `ui.py` (main window picture), `overlay.py` (overlay picture with transparency), `penguin.py` / `icons.py` (drawing), `qt_app.py` / `macos.py` (the actual windows), `tracker.py` (MediaPipe), `camera.py`, `config.py`, `app.py` (start-up).
+Code layout: `mosign/gestures.py` (gesture rules), `controller.py` (gestures to actions), `onboarding.py` (tour), `engine.py` (one frame: camera to actions to pictures), `ui.py` (main window picture), `overlay.py` (overlay picture with transparency), `cat.py` (the cat: looks, animation, jumping), `tabs.py` (finding browser tabs), `icons.py` (gesture pictures), `qt_app.py` / `macos.py` (the actual windows), `tracker.py` (MediaPipe), `camera.py`, `config.py`, `app.py` (start-up).
+
+## Credits
+
+The cat's artwork comes from the "feed cat" Rive file (`mosign/assets/cat/source-feed-cat.riv`, community file 21865-41430). Mosign uses its image layers and animates them itself. Check the file's licence on Rive before you publish builds widely.
 
